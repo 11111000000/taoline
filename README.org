@@ -1,0 +1,35 @@
+* Taoline
+
+#+BEGIN_VERSE
+For editing!
+#+END_VERSE
+
+Taoline removes the modeline and replaces it with a slimmer proxy version, which displays some basic information in the echo area instead.  This information is only displayed if the echo area is not used for anything else (but if you switch frame/window, it will replace whatever message is currently displayed).
+
+** Troubleshooting
+
+Just toggle /taoline-mode/ on and then off (i.e. M-x taoline twice:).
+
+** Customizations
+
+There are some customizations available, check out
+
+#+BEGIN_SRC emacs-lisp
+(customize-group taoline)
+#+END_SRC
+
+to see what you can do. An example init snippet would look something like:
+
+#+BEGIN_SRC emacs-lisp
+(use-package    taoline
+  :ensure       t
+  :custom
+  (taoline-show-git-branch      t)
+  (taoline-show-dir             t)
+  (taoline-show-time            nil)
+  (taoline-show-previous-buffer nil)
+  :config
+  (taoline-mode t))
+#+END_SRC
+
+** TODO Screenshots
