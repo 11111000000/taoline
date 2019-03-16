@@ -98,6 +98,9 @@
 (defcustom taoline-show-directory t
   "Set this if you want to show the direcory path as well as the file-name in the modeline proxy."
   :group 'taoline)
+(defcustom taoline-show-buffer-name t
+  "Set this if you want to show the current 'buffer-name' in the modeline proxy."
+  :group 'taoline)
 
 (defun taoline-previous-buffer-name ()
   "Get name of previous buffer."
@@ -140,11 +143,16 @@ sent to `add-text-properties'.")
                 (file-name-directory (buffer-file-name)))
              ""))
     (face taoline-dir-face))
-   ("%s" ((if (buffer-file-name) (file-name-nondirectory (buffer-file-name))
-            (buffer-name)))
+   ("%s" ((if taoline-show-buffer-name
+              (if (buffer-file-name)
+                  (file-name-nondirectory (buffer-file-name))
+                (buffer-name))
+            ""))
     (face taoline-bufname-face))
-   ("%s" ((if (and (buffer-file-name) (buffer-modified-p)) "*"
-            "" ))
+   ("%s" ((if taoline-show-buffer-name
+              (if (and (buffer-file-name) (buffer-modified-p)) "*"
+                "" )
+            ""))
     (face taoline-asterisk-face))
    ("%s" ((if taoline-show-git-branch (concat " : " (taoline--git-branch-string))
             ""))
