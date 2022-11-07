@@ -63,8 +63,11 @@
 
 (setq taoline-use-legacy-settings nil)
 
-(defface taoline-time-face '((t :inherit 'font-lock-comment-face))
+(defface taoline-time-face '((t :inherit 'default))
   "Taoline timestamp face."
+  :group 'taoline)
+(defface taoline-input-face '((t :inherit 'font-lock-comment-face))
+  "Taoline input face."
   :group 'taoline)
 (defface taoline-linum-face '((t :inherit 'default))
   "Taoline linum face."
@@ -86,20 +89,11 @@
   :group 'taoline)
 
 ;; Customizations
-(defcustom taoline-show-time nil
-  "Set this if you want to show the time in the modeline proxy."
-  :group 'taoline)
-(defcustom taoline-show-git-branch nil
-  "Set this if you want to show the git branch in the modeline proxy."
-  :group 'taoline)
 (defcustom taoline-show-previous-buffer nil
   "Set this if you want to show the previous 'buffer-name' in the modeline proxy."
   :group 'taoline)
 (defcustom taoline-show-directory t
   "Set this if you want to show the direcory path as well as the file-name in the modeline proxy."
-  :group 'taoline)
-(defcustom taoline-show-buffer-name t
-  "Set this if you want to show the current 'buffer-name' in the modeline proxy."
   :group 'taoline)
 
 (defun taoline-previous-buffer-name ()
@@ -133,33 +127,30 @@ sent to `add-text-properties'.")
 (setq
  taoline-mode-line-text
  '(
-   ("%s" ((if taoline-show-time (format-time-string "[%H:%M:%S] ") ""))
+   ("[%s] " ((cond ((equal current-input-method "russian-computer") "RU") (t "EN")))
+    (face taoline-input-face))
+   ("[%s] " ((format-time-string "%H:%M:%S"))
     (face taoline-time-face))
-   ("%6s" ((format "%s:%s" (format-mode-line "%l") (current-column)))
+   ("%6s " ((format "%s:%s" (format-mode-line "%l") (current-column)))
     (face taoline-linum-face))
-   (" %s" ((if (and taoline-show-directory (buffer-file-name))
-               (replace-regexp-in-string
-                taoline--home-dir "~"
-                (file-name-directory (buffer-file-name)))
-             ""))
+   ("%s" ((if (and taoline-show-directory (buffer-file-name))
+              (replace-regexp-in-string
+               taoline--home-dir "~"
+               (file-name-directory (buffer-file-name)))
+            ""))
     (face taoline-dir-face))
-   ("%s" ((if taoline-show-buffer-name
-              (if (buffer-file-name)
-                  (file-name-nondirectory (buffer-file-name))
-                (buffer-name))
-            ""))
+   ("%s" ((if (buffer-file-name)
+              (file-name-nondirectory (buffer-file-name))
+            (buffer-name)))
     (face taoline-bufname-face))
-   ("%s" ((if taoline-show-buffer-name
-              (if (and (buffer-file-name) (buffer-modified-p)) "*"
-                "" )
-            ""))
+   ("%s" ((if (buffer-modified-p) "*"
+            "" ))
     (face taoline-asterisk-face))
-   ("%s" ((if taoline-show-git-branch (concat " : " (taoline--git-branch-string))
-            ""))
+   ("%s" ((concat ":" (taoline--git-branch-string)))
     (face taoline-git-branch-face))
-   ("%s" ((if taoline-show-previous-buffer (concat " | " (taoline-previous-buffer-name))
-            ""))
-   (face taoline-previous-buffer-face)))
+   ;; ("%s" ((concat " | " (taoline-previous-buffer-name)))
+   ;; (face taoline-previous-buffer-face))
+   )
  )
 
 
