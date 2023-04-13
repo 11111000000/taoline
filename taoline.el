@@ -1,4 +1,4 @@
-;;; taoline.el --- Replace modeline with a slimmer proxy
+;;; taoline.el --- Replace modeline with a slimmer proxy -*- lexical-binding: t; -*-
 
 ;; taoline © 2018-∞ Peter 11111000000
 ;; feebleline © 2018 Benjamin Lindqvist
@@ -63,21 +63,24 @@
 
 (setq taoline-use-legacy-settings nil)
 
-(defface taoline-time-face '((t :inherit 'default))
-  "Taoline timestamp face."
+(defface taoline-time-face '((t :height 0.9 :box t :bold nil :family "LCD"))
+  "Taoline time face."
   :group 'taoline)
+;; (defface taoline-time-face '((t :inherit 'default))
+;;   "Taoline timestamp face."
+;;   :group 'taoline)
 (defface taoline-input-face '((t :inherit 'font-lock-comment-face))
   "Taoline input face."
+  :group 'taoline)
+(defface taoline-bufname-face '((t :inherit 'default))
+  "Taoline filename face."
   :group 'taoline)
 (defface taoline-linum-face '((t :inherit 'default))
   "Taoline linum face."
   :group 'taoline)
-(defface taoline-bufname-face '((t :inherit 'font-lock-function-name-face))
-  "Taoline filename face."
-  :group 'taoline)
-(defface taoline-asterisk-face '((t :foreground "salmon"))
+(defface taoline-asterisk-face '((t :foreground "black"))
   "Taoline file modified asterisk face."
-  :group 'taoline)
+  :group 'taoline) 
 (defface taoline-previous-buffer-face '((t :foreground "#7e7e7e"))
   "Taoline filename face."
   :group 'taoline)
@@ -124,35 +127,34 @@ sent to `add-text-properties'.")
 
 (defvar taoline--home-dir nil)
 
-(setq
- taoline-mode-line-text
+(setq taoline-mode-line-text
  '(
-   ("[%s] " ((cond ((equal current-input-method "russian-computer") "RU") (t "EN")))
-    (face taoline-input-face))
-   ("[%s] " ((format-time-string "%H:%M:%S"))
-    (face taoline-time-face))
-   ("%6s " ((format "%s:%s" (format-mode-line "%l") (current-column)))
-    (face taoline-linum-face))
-   ("%s" ((if (and taoline-show-directory (buffer-file-name))
+   ("%s " ((if (eq major-mode 'exwm-mode) "?" (all-the-icons-icon-for-mode major-mode)))
+    ((if (or (eq major-mode 'exwm-mode) (eq major-mode 'minibuffer-mode)) '(face taoline-input-face) (text-properties-at 0 (all-the-icons-icon-for-mode major-mode :height 0.8)))))
+   ("%s " ((cond ((equal current-input-method "russian-computer") "RU") (t "EN")))
+    ( '(face taoline-input-face)))
+   (" %s " ((format-time-string "%H:%M:%S"))
+    ( '(face taoline-time-face)))
+   (" %s" ((if (and taoline-show-directory (buffer-file-name))
               (replace-regexp-in-string
                taoline--home-dir "~"
                (file-name-directory (buffer-file-name)))
             ""))
-    (face taoline-dir-face))
+    ( '(face taoline-dir-face)))
    ("%s" ((if (buffer-file-name)
               (file-name-nondirectory (buffer-file-name))
             (buffer-name)))
-    (face taoline-bufname-face))
-   ("%s" ((if (buffer-modified-p) "*"
-            "" ))
-    (face taoline-asterisk-face))
+    ( '(face taoline-bufname-face)))
    ("%s" ((concat ":" (taoline--git-branch-string)))
-    (face taoline-git-branch-face))
+    ( '(face taoline-git-branch-face)))
+   ("%s" ((if (buffer-modified-p) " * "
+            "" ))
+    ( '(face taoline-asterisk-face)))
+   ("  %s " ((format "%s:%s" (format-mode-line "%l") (current-column)))
+    ( '(face taoline-linum-face)))
    ;; ("%s" ((concat " | " (taoline-previous-buffer-name)))
    ;; (face taoline-previous-buffer-face))
-   )
- )
-
+   ))
 
 (defun taoline-default-settings-on ()
   "Some default settings that works well with taoline."
@@ -180,7 +182,7 @@ sent to `add-text-properties'.")
         (setq taoline--home-dir (expand-file-name "~"))
         (setq taoline/mode-line-format-previous mode-line-format)
         (setq taoline/timer
-              (run-with-timer 0 0.5 'taoline-mode-line-proxy-fn))
+              (run-with-timer 0 0.08 'taoline-mode-line-proxy-fn))
         (if taoline-use-legacy-settings (taoline-legacy-settings-on)
           (taoline-default-settings-on))
         ;; (ad-activate 'handle-switch-frame)
@@ -201,10 +203,12 @@ sent to `add-text-properties'.")
 (defun taoline--mode-line-part (part)
   "Return a PART (an element) of `taoline-mode-line-text` as a propertized string."
   (let ((text (apply #'format (append (list (car part))
-                                      (mapcar #'eval (cadr part)))))
-        (props (elt part 2)))
-    (when props
-      (add-text-properties 0 (length text) props text))
+                                   (mapcar #'eval (cadr part)))))
+       (props  (eval (car (elt part 2)))))
+    (progn
+      ;(pp props)
+      (when props
+      (add-text-properties 0 (length text) props text)))
     text))
 
 (defvar taoline-placeholder)
