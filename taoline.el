@@ -63,7 +63,7 @@
 
 (setq taoline-use-legacy-settings nil)
 
-(defface taoline-time-face '((t :height 0.9 :box t :bold nil :family "LCD"))
+(defface taoline-time-face '((t :height 0.9 :box nil :bold nil :family "LCD"))
   "Taoline time face."
   :group 'taoline)
 ;; (defface taoline-time-face '((t :inherit 'default))
@@ -127,14 +127,18 @@ sent to `add-text-properties'.")
 
 (defvar taoline--home-dir nil)
 
+(require 'all-the-icons)
+
+(setq taoline-default-icon (all-the-icons-octicon "browser" :height 1  :v-adjust 0))
+
 (setq taoline-mode-line-text
  '(
-   ("%s " ((if (eq major-mode 'exwm-mode) "?" (all-the-icons-icon-for-mode major-mode)))
-    ((if (or (eq major-mode 'exwm-mode) (eq major-mode 'minibuffer-mode)) '(face taoline-input-face) (text-properties-at 0 (all-the-icons-icon-for-mode major-mode :height 0.8)))))
    ("%s " ((cond ((equal current-input-method "russian-computer") "RU") (t "EN")))
     ( '(face taoline-input-face)))
-   (" %s " ((format-time-string "%H:%M:%S"))
+   ("%s " ((format-time-string "%H:%M:%S"))
     ( '(face taoline-time-face)))
+   ("%s" ((let ((icon (all-the-icons-icon-for-mode major-mode))) (if (symbolp icon) taoline-default-icon icon)))
+    ((let ((icon (all-the-icons-icon-for-mode major-mode :height 0.8))) (if (symbolp icon) nil (text-properties-at 0 icon)))))
    (" %s" ((if (and taoline-show-directory (buffer-file-name))
               (replace-regexp-in-string
                taoline--home-dir "~"
@@ -144,7 +148,7 @@ sent to `add-text-properties'.")
    ("%s" ((if (buffer-file-name)
               (file-name-nondirectory (buffer-file-name))
             (buffer-name)))
-    ( '(face taoline-bufname-face)))
+    nil) ;; WAT?!: using face here add props to buffer name in tab-mode!
    ("%s" ((concat ":" (taoline--git-branch-string)))
     ( '(face taoline-git-branch-face)))
    ("%s" ((if (buffer-modified-p) " * "
@@ -182,7 +186,7 @@ sent to `add-text-properties'.")
         (setq taoline--home-dir (expand-file-name "~"))
         (setq taoline/mode-line-format-previous mode-line-format)
         (setq taoline/timer
-              (run-with-timer 0 0.08 'taoline-mode-line-proxy-fn))
+               (run-with-timer 0 0.08 'taoline-mode-line-proxy-fn))
         (if taoline-use-legacy-settings (taoline-legacy-settings-on)
           (taoline-default-settings-on))
         ;; (ad-activate 'handle-switch-frame)
