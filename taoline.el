@@ -63,7 +63,7 @@
 
 (setq taoline-use-legacy-settings nil)
 
-(defface taoline-time-face '((t :height 0.9 :box nil :bold nil :family "LCD"))
+(defface taoline-time-face '((t :background "#002200" :foreground "#00aa00" :height 1.0 :box "#005500" :bold nil :family "Digital Display"))
   "Taoline time face."
   :group 'taoline)
 ;; (defface taoline-time-face '((t :inherit 'default))
@@ -80,7 +80,7 @@
   :group 'taoline)
 (defface taoline-asterisk-face '((t :foreground "black"))
   "Taoline file modified asterisk face."
-  :group 'taoline) 
+  :group 'taoline)
 (defface taoline-previous-buffer-face '((t :foreground "#7e7e7e"))
   "Taoline filename face."
   :group 'taoline)
@@ -135,9 +135,9 @@ sent to `add-text-properties'.")
  '(
    ("%s " ((cond ((equal current-input-method "russian-computer") "RU") (t "EN")))
     ( '(face taoline-input-face)))
-   ("%s " ((format-time-string "%H:%M:%S"))
+   ("%s" ((format-time-string "%H:%M:%S"))
     ( '(face taoline-time-face)))
-   ("%s" ((let ((icon (all-the-icons-icon-for-mode major-mode))) (if (symbolp icon) taoline-default-icon icon)))
+   (" %s" ((let ((icon (all-the-icons-icon-for-mode major-mode))) (if (symbolp icon) taoline-default-icon icon)))
     ((let ((icon (all-the-icons-icon-for-mode major-mode :height 0.8))) (if (symbolp icon) nil (text-properties-at 0 icon)))))
    (" %s" ((if (and taoline-show-directory (buffer-file-name))
               (replace-regexp-in-string
