@@ -63,22 +63,22 @@
 
 (setq taoline-use-legacy-settings nil)
 
-(defface taoline-time-face '((t :background "#002200" :foreground "#00aa00" :height 1.0 :box "#005500" :bold nil :family "Digital Display"))
+(defface taoline-time-face '((t :background "#002200" :foreground "#00aa00" :height 0.9 :box "#005500" :bold nil :family "Digital Display"))
   "Taoline time face."
   :group 'taoline)
 ;; (defface taoline-time-face '((t :inherit 'default))
 ;;   "Taoline timestamp face."
 ;;   :group 'taoline)
-(defface taoline-input-face '((t :inherit 'font-lock-comment-face))
+(defface taoline-input-face '((t :inherit 'fixed-pitch :height 0.8))
   "Taoline input face."
   :group 'taoline)
-(defface taoline-bufname-face '((t :inherit 'default))
+(defface taoline-bufname-face '((t :inherit 'fixed-pitch))
   "Taoline filename face."
   :group 'taoline)
-(defface taoline-linum-face '((t :inherit 'default))
+(defface taoline-linum-face '((t :inherit 'fixed-pitch :height 0.7))
   "Taoline linum face."
   :group 'taoline)
-(defface taoline-asterisk-face '((t :foreground "black"))
+(defface taoline-asterisk-face '((t :foreground "yellow"  :inherit 'fixed-pitch :height 0.8))
   "Taoline file modified asterisk face."
   :group 'taoline)
 (defface taoline-previous-buffer-face '((t :foreground "#7e7e7e"))
@@ -123,7 +123,7 @@ sent to `add-text-properties'.")
       (if (> (length git-output) 0)
           (substring git-output 0 -1)
           ;; (concat " :" (substring git-output 0 -1))
-        "(no branch)"))))
+        ""))))
 
 (defvar taoline--home-dir nil)
 
@@ -133,9 +133,9 @@ sent to `add-text-properties'.")
 
 (setq taoline-mode-line-text
  '(
-   ("%s " ((cond ((equal current-input-method "russian-computer") "RU") (t "EN")))
+   ("%s " ((cond ((equal current-input-method "russian-computer") "") (t "EN")))
     ( '(face taoline-input-face)))
-   ("%s" ((format-time-string "%H:%M:%S"))
+   (" %s " ((format-time-string "%H:%M:%S"))
     ( '(face taoline-time-face)))
    (" %s" ((let ((icon (all-the-icons-icon-for-mode major-mode))) (if (symbolp icon) taoline-default-icon icon)))
     ((let ((icon (all-the-icons-icon-for-mode major-mode :height 0.8))) (if (symbolp icon) nil (text-properties-at 0 icon)))))
@@ -149,12 +149,12 @@ sent to `add-text-properties'.")
               (file-name-nondirectory (buffer-file-name))
             (buffer-name)))
     nil) ;; WAT?!: using face here add props to buffer name in tab-mode!
-   ("%s" ((concat ":" (taoline--git-branch-string)))
+   ("%s" ((let ((branch (taoline--git-branch-string))) (if (> (length branch) 0) (concat ":" branch) "")))
     ( '(face taoline-git-branch-face)))
-   ("%s" ((if (buffer-modified-p) " * "
+   ("%s" ((if (buffer-modified-p) " * " 
             "" ))
     ( '(face taoline-asterisk-face)))
-   ("  %s " ((format "%s:%s" (format-mode-line "%l") (current-column)))
+   (" %s " ((format "%s:%s" (format-mode-line "%l") (current-column)))
     ( '(face taoline-linum-face)))
    ;; ("%s" ((concat " | " (taoline-previous-buffer-name)))
    ;; (face taoline-previous-buffer-face))
