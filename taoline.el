@@ -72,7 +72,7 @@
 (defface taoline-input-face '((t :inherit 'fixed-pitch :height 0.8))
   "Taoline input face."
   :group 'taoline)
-(defface taoline-bufname-face '((t :inherit 'fixed-pitch))
+(defface taoline-bufname-face '((t :inherit 'fixed-pitch :height 0.9))
   "Taoline filename face."
   :group 'taoline)
 (defface taoline-linum-face '((t :inherit 'fixed-pitch :height 0.7))
@@ -81,13 +81,13 @@
 (defface taoline-asterisk-face '((t :foreground "yellow"  :inherit 'fixed-pitch :height 0.8))
   "Taoline file modified asterisk face."
   :group 'taoline)
-(defface taoline-previous-buffer-face '((t :foreground "#7e7e7e"))
+(defface taoline-previous-buffer-face '((t :foreground "#7e7e7e" :height 0.9))
   "Taoline filename face."
   :group 'taoline)
-(defface taoline-dir-face '((t :inherit 'font-lock-variable-name-face))
+(defface taoline-dir-face '((t :inherit 'font-lock-variable-name-face :height 0.9))
   "Taoline filename face."
   :group 'taoline)
-(defface taoline-git-branch-face '((t :inherit 'font-lock-comment-face :bold nil :italic t))
+(defface taoline-git-branch-face '((t :inherit 'font-lock-comment-face :bold nil :italic t :height 0.9))
   "Taoline filename face."
   :group 'taoline)
 
