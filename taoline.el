@@ -63,31 +63,28 @@
 
 (setq taoline-use-legacy-settings nil)
 
-(defface taoline-time-face '((t :background "#002200" :foreground "#00aa00" :height 0.9 :box "#005500" :bold nil :family "Digital Display"))
-  "Taoline time face."
+(defface taoline-time-face '((t :background "#002200" :foreground "#00aa00" :height 0.96 :bold nil :family "Digital Display"))
+  "Taoline time face (with improved vertical centering for minibuffer proxy)."
   :group 'taoline)
-;; (defface taoline-time-face '((t :inherit 'default))
-;;   "Taoline timestamp face."
-;;   :group 'taoline)
-(defface taoline-input-face '((t :inherit 'fixed-pitch :height 0.8))
+(defface taoline-input-face '((t :inherit 'fixed-pitch :height 0.92))
   "Taoline input face."
   :group 'taoline)
-(defface taoline-bufname-face '((t :inherit 'fixed-pitch :height 0.9))
+(defface taoline-bufname-face '((t :inherit 'fixed-pitch :height 0.96))
   "Taoline filename face."
   :group 'taoline)
-(defface taoline-linum-face '((t :inherit 'fixed-pitch :height 0.7))
+(defface taoline-linum-face '((t :inherit 'fixed-pitch :height 0.90))
   "Taoline linum face."
   :group 'taoline)
-(defface taoline-asterisk-face '((t :foreground "yellow"  :inherit 'fixed-pitch :height 0.8))
+(defface taoline-asterisk-face '((t :foreground "yellow"  :inherit 'fixed-pitch :height 0.92))
   "Taoline file modified asterisk face."
   :group 'taoline)
-(defface taoline-previous-buffer-face '((t :foreground "#7e7e7e" :height 0.9))
+(defface taoline-previous-buffer-face '((t :foreground "#7e7e7e" :height 0.96))
   "Taoline filename face."
   :group 'taoline)
-(defface taoline-dir-face '((t :inherit 'font-lock-variable-name-face :height 0.9))
+(defface taoline-dir-face '((t :inherit 'font-lock-variable-name-face :height 0.96))
   "Taoline filename face."
   :group 'taoline)
-(defface taoline-git-branch-face '((t :inherit 'font-lock-comment-face :bold nil :italic t :height 0.9))
+(defface taoline-git-branch-face '((t :inherit 'font-lock-comment-face :bold nil :italic t :height 0.96))
   "Taoline filename face."
   :group 'taoline)
 
@@ -137,8 +134,12 @@ sent to `add-text-properties'.")
     ( '(face taoline-input-face)))
    (" %s " ((format-time-string "%H:%M:%S"))
     ( '(face taoline-time-face)))
-   (" %s" ((let ((icon (all-the-icons-icon-for-mode major-mode))) (if (symbolp icon) taoline-default-icon icon)))
-    ((let ((icon (all-the-icons-icon-for-mode major-mode :height 0.8))) (if (symbolp icon) nil (text-properties-at 0 icon)))))
+   (" %s" ((let ((icon (all-the-icons-icon-for-mode major-mode)))
+             (cond
+              ((or (not icon) (symbolp icon)) (or taoline-default-icon ""))
+              (t icon))))
+    ((let ((icon (all-the-icons-icon-for-mode major-mode :height 0.8)))
+       (and icon (not (symbolp icon)) (text-properties-at 0 icon)))))
    (" %s" ((if (and taoline-show-directory (buffer-file-name))
               (replace-regexp-in-string
                taoline--home-dir "~"
@@ -146,9 +147,9 @@ sent to `add-text-properties'.")
             ""))
     ( '(face taoline-dir-face)))
    ("%s" ((if (buffer-file-name)
-              (file-name-nondirectory (buffer-file-name))
-            (buffer-name)))
-    nil) ;; WAT?!: using face here add props to buffer name in tab-mode!
+              (substring-no-properties (file-name-nondirectory (buffer-file-name)))
+            (substring-no-properties (buffer-name))))
+    nil) ;; Очистка text properties с имени буфера!
    ("%s" ((let ((branch (taoline--git-branch-string))) (if (> (length branch) 0) (concat ":" branch) "")))
     ( '(face taoline-git-branch-face)))
    ("%s" ((if (buffer-modified-p) " * " 
@@ -174,6 +175,8 @@ sent to `add-text-properties'.")
 
 (defvar taoline/timer)
 (defvar taoline/mode-line-format-previous)
+
+(defvar taoline--last-placeholder "")
 
 ;;;###autoload
 (define-minor-mode taoline-mode
@@ -206,28 +209,37 @@ sent to `add-text-properties'.")
 
 (defun taoline--mode-line-part (part)
   "Return a PART (an element) of `taoline-mode-line-text` as a propertized string."
-  (let ((text (apply #'format (append (list (car part))
-                                   (mapcar #'eval (cadr part)))))
-       (props  (eval (car (elt part 2)))))
-    (progn
-      ;(pp props)
-      (when props
-      (add-text-properties 0 (length text) props text)))
+  (let* ((args (mapcar #'eval (cadr part)))
+         ;; Ensure first arg to format is a string even if nil
+         (fmt (or (car part) ""))
+         (text (apply #'format (append (list fmt) args)))
+         (props  (eval (car (elt part 2)))))
+    (when props
+      (add-text-properties 0 (length text) props text))
     text))
 
 (defvar taoline-placeholder)
 (defvar taoline--last-placeholder "")
 
 (defun taoline-write-buffer-name-maybe ()
-  "Replace echo-area message with mode-line proxy (unless minibuffer is active or text is unchanged)."
+  "Replace echo-area message with mode-line proxy (unless minibuffer is active, minibuf contains overlays, or text is unchanged).
+If eldoc-box or another overlay is currently displaying something, taoline will not overwrite the echo area."
   (when (and (not (active-minibuffer-window))
              (get-buffer " *Minibuf-0*"))
-    (let ((placeholder (mapconcat #'taoline--mode-line-part taoline-mode-line-text "")))
-      (unless (equal placeholder taoline--last-placeholder)
-        (setq taoline--last-placeholder placeholder)
-        (with-current-buffer " *Minibuf-0*"
-          (erase-buffer)
-          (insert placeholder))))))
+    (with-current-buffer " *Minibuf-0*"
+      (let* ((currentbuf (window-buffer (selected-window))) ;; выбираем активный буфер
+             (placeholder
+              (with-current-buffer currentbuf
+                (mapconcat
+                 (lambda (x) (substring-no-properties x)) ; Стираем все text properties с каждой части!
+                 (mapcar #'taoline--mode-line-part taoline-mode-line-text)
+                 ""))))
+        (let ((has-ol (overlays-in (point-min) (point-max))))
+          (when (and (not has-ol))
+            (unless (equal placeholder taoline--last-placeholder)
+              (setq taoline--last-placeholder placeholder)
+              (erase-buffer)
+              (insert placeholder))))))))
 
 (defun taoline-mode-line-proxy-fn ()
   "Put a mode-line proxy in the echo area *if* echo area is empty."
