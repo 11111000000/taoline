@@ -186,7 +186,7 @@ sent to `add-text-properties'.")
         (setq taoline--home-dir (expand-file-name "~"))
         (setq taoline/mode-line-format-previous mode-line-format)
         (setq taoline/timer
-               (run-with-timer 0 0.08 'taoline-mode-line-proxy-fn))
+               (run-with-timer 0 0.2 'taoline-mode-line-proxy-fn)) ;; Reduced timer frequency for better performance.
         (if taoline-use-legacy-settings (taoline-legacy-settings-on)
           (taoline-default-settings-on))
         ;; (ad-activate 'handle-switch-frame)
@@ -216,17 +216,23 @@ sent to `add-text-properties'.")
     text))
 
 (defvar taoline-placeholder)
+(defvar taoline--last-placeholder "")
+
 (defun taoline-write-buffer-name-maybe ()
-  "Replace echo-area message with mode-line proxy."
-  (progn (setq taoline-placeholder (mapconcat #'taoline--mode-line-part
-                                                 taoline-mode-line-text ""))
-         (with-current-buffer " *Minibuf-0*"
-           (erase-buffer)
-           (insert taoline-placeholder))))
+  "Replace echo-area message with mode-line proxy (unless minibuffer is active or text is unchanged)."
+  (when (and (not (active-minibuffer-window))
+             (get-buffer " *Minibuf-0*"))
+    (let ((placeholder (mapconcat #'taoline--mode-line-part taoline-mode-line-text "")))
+      (unless (equal placeholder taoline--last-placeholder)
+        (setq taoline--last-placeholder placeholder)
+        (with-current-buffer " *Minibuf-0*"
+          (erase-buffer)
+          (insert placeholder))))))
 
 (defun taoline-mode-line-proxy-fn ()
   "Put a mode-line proxy in the echo area *if* echo area is empty."
-  (unless (current-message)
+  (unless (or (current-message)
+              (active-minibuffer-window)) ; Do not update if minibuffer is used.
     (taoline-write-buffer-name-maybe)))
 
 ;; (defadvice handle-switch-frame (after switch-frame-message-name)
