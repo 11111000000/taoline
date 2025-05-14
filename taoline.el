@@ -134,6 +134,9 @@ sent to `add-text-properties'.")
     ( '(face taoline-input-face)))
    (" %s " ((format-time-string "%H:%M:%S"))
     ( '(face taoline-time-face)))
+   ;; Батарея: иконка + процент
+   (" %s " ((taoline--battery-string))
+    nil)
    (" %s" ((let ((icon (all-the-icons-icon-for-mode major-mode)))
              (cond
               ((or (not icon) (symbolp icon)) (or taoline-default-icon ""))
@@ -252,6 +255,28 @@ If eldoc-box or another overlay is currently displaying something, taoline will 
 ;;   (taoline-write-buffer-name-maybe)
 ;;   ad-do-it
 ;;   (taoline-write-buffer-name-maybe))
+
+;; === Батарея: функция получения иконки и процента ===
+(defun taoline--battery-string ()
+  "Return battery icon and percentage based on battery-status-function format."
+  (if (functionp battery-status-function)
+      (let* ((data (ignore-errors (funcall battery-status-function)))
+             ;; Попробуем оба варианта ключей: строкой и ASCII-кодом ?
+             (percent-str (or (cdr (assoc "percentage" data))
+                              (cdr (assoc 112 data))     ; 112 = ?p
+                              (cdr (assoc ?p data)))))
+        (if (and percent-str (string-match-p "^[0-9]+$" percent-str))
+            (let* ((percent (string-to-number percent-str))
+                   (icon
+                    (cond
+                     ((>= percent 95) (all-the-icons-faicon "battery-full" :height 0.95 :v-adjust -0.05))
+                     ((>= percent 70) (all-the-icons-faicon "battery-three-quarters" :height 0.95 :v-adjust -0.05))
+                     ((>= percent 45) (all-the-icons-faicon "battery-half" :height 0.95 :v-adjust -0.05))
+                     ((>= percent 20) (all-the-icons-faicon "battery-quarter" :height 0.95 :v-adjust -0.05))
+                     (t (all-the-icons-faicon "battery-empty" :height 0.95 :v-adjust -0.05)))))
+              (format "%s %s%%" icon percent))
+          ""))
+    ""))
 
 (provide 'taoline)
 ;;; taoline.el ends here
