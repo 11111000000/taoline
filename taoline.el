@@ -1,525 +1,598 @@
-;;; taoline.el --- Slim modeline proxy without timers  -*- lexical-binding: t; -*-
+;;; taoline.el --- Functional minimalist modeline for Emacs -*- lexical-binding: t; -*-
 
-;; Copyright (C) 2024  Taoline contributors
-;;
+;; Copyright (C) 2025  Peter
+
 ;; Author: Peter <11111000000@email.com>
-;; URL:   https://github.com/11111000000/taoline
-;; Version: 0.2
-;; Package-Requires: ((emacs "26.1") (posframe "1.4.1") (all-the-icons "4.0.1"))
-;; Keywords: convenience, mode-line
+;; Version: 2.0
+;; Package-Requires: ((emacs "27.1") (posframe "1.1.0"))
+;; Keywords: mode-line, minimal, functional, faces
+;; URL: https://github.com/11111000000/taoline
 
-;; This file is NOT part of GNU Emacs.
-
-;; GNU General Public License v3 or later.
+;; License: MIT
 
 ;;; Commentary:
 
-;; “taoline” прячет стандартный mode-line и рендерит его упрощённую
-;; версию в:
+;; taoline.el provides a minimal modeline for Emacs with modern,
+;; functional-programming-based architecture.  All logic is split into pure
+;; functions, and all side-effects are isolated in backend modules.
 ;;
-;;   • echo-area (message),
-;;   • child-frame (posframe) приклеенный к нижней кромке,
-;;   • header-line активного окна.
+;; Features:
+;; - Minimalist, highly customizable segments.
+;; - Functional style: pure segment functions, stateless composition.
+;; - Multiple backends: echo area, header-line, and posframe.
+;; - Easy extension via macros for new segments.
+;; - No periodic timers; only updates on user commands (post-command-hook, etc).
+;; - Unit-testable core compose logic.
 ;;
-;; Обновление выполняется без таймеров: после каждой команды и нескольких
-;; системных событий, так что минибуфер остаётся свободным, а Emacs не
-;; будит интерпретатор каждые N-миллисекунд.
+;; See README on GitHub for usage and extension details.
 
 ;;; Code:
 
-(require 'subr-x)          ; string-helpers
-(require 'posframe nil t)  ; мягкая зависимость — нужен только для child-frame
-(require 'all-the-icons nil t)
+(require 'cl-lib)
+(require 'subr-x)
+(eval-when-compile (require 'rx))
 
-(defface taoline-time-face
-  '((t :background "#002200" :foreground "#00aa00" :weight normal))
-  "Face for time segment (green on black, как в прежней taoline)."
-  :group 'taoline)
+;; Optional: Only if posframe is available and user wants it
+(eval-and-compile
+  (ignore-errors (require 'posframe)))
 
-
-
-(defcustom taoline-time-align-right t
-  "When non-nil, the time segment is right-aligned.
-The algorithm calculates the width of the currently selected
-frame (in character cells) and pads the taoline string with
-spaces so that the clock is stuck to the right edge (see
-`taoline-time-right-margin').  If nil, the clock appears
-wherever it is placed in `taoline-segments'."
-  :type 'boolean
-  :group 'taoline)
-
-(defcustom taoline-time-right-margin 2
-  "Extra *character* gap between the right edge of the frame
-and the clock when `taoline-time-align-right' is non-nil.
-
-16 px ≃ 2 standard characters on typical 8-px fonts, therefore
-the default is 2."
-  :type 'integer
-  :group 'taoline)
-
-(defface taoline-filename-face
-  '((t :inherit mode-line-buffer-id))
-  "Face for file/buffer name."
-  :group 'taoline)
-
-(defface taoline-modified-face
-  '((t :inherit default :foreground "orange"))
-  "Face for ‘modified’ asterisk."
-  :group 'taoline)
-
-(defface taoline-battery-face
-  '((t :background "#002200" :foreground "#00aa00"))
-  "Face for battery segment (green on black)."
-  :group 'taoline)
- 
 (defgroup taoline nil
-  "Slim modeline proxy."
-  :group 'convenience)
+  "Functional minimalist mode-line replacement."
+  :group 'convenience
+  :prefix "taoline-")
 
-(defcustom taoline-display-backend
-  (if (and (featurep 'posframe) (display-graphic-p)) 'child-frame 'echo-area)
-  "Where to render taoline.  One of: echo-area, child-frame, header-line."
-  :type '(choice (const echo-area) (const child-frame) (const header-line))
+;; ----------------------------------------------------------------------------
+;; Customizable variables
+
+(defcustom taoline-display-backend 'modeline
+  "Backend to show the modeline.
+Supported values: 'modeline, 'echo, 'header, 'posframe"
+  :type '(choice (const :tag "In-window modeline" modeline)
+                 (const :tag "Echo area" echo)
+                 (const :tag "Header line" header)
+                 (const :tag "Child frame (posframe)" posframe))
   :group 'taoline)
 
 (defcustom taoline-segments
-  '((time . "HH:MM")
-    (battery . "BAT")
-    (filename . "FILENAME")
-    (mode . "MODE"))
+  '((:left taoline-segment-git-branch taoline-segment-buffer-name)
+    (:right taoline-segment-major-mode taoline-segment-time))
   "List of segments to display in the modeline.
-Each element is a cons cell (NAME . FORMAT) where NAME is a symbol
-and FORMAT is a string. The following names are supported:
-`time', `battery', `filename', `mode'."
-  :type '(alist :key-type symbol :value-type string)
+:LEFT and :RIGHT are lists of segment *function symbols*."
+  :type '(alist :key-type symbol :value-type (repeat function))
   :group 'taoline)
 
-
-(defface taoline-posframe-face
-  '((t :family "monospace" :height 1.0))
-  "Face for taoline child-frame line (used to uniformalize height & vertical alignment)."
+(defcustom taoline-update-hooks
+  '(post-command-hook find-file-hook after-save-hook)
+  "A list of hooks triggering taoline update."
+  :type '(repeat symbol)
   :group 'taoline)
 
-(defcustom taoline-child-frame-parameters
-  '((left-fringe . 0) (right-fringe . 0)
-    (internal-border-width . 0)
-    (undecorated . t) (no-accept-focus . t)
-    (minibuffer . nil) (visibility . nil)
-    (skip-taskbar . t) (border-width . 0)
-    (vertical-scroll-bars . nil)
-    (horizontal-scroll-bars . nil)
-    (menu-bar-lines . 0) (tool-bar-lines . 0)
-    (line-spacing . 0.08))  ;; чуть меньше пространства (около 2px)
-  "Parameters passed to ‘posframe’ child frame."
-  :type 'alist
+;; ----------------------------------------------------------------------------
+;; Faces
+
+(defface taoline-base-face
+  '((t :inherit mode-line))
+  "Base face for taoline."
   :group 'taoline)
 
-(defvar taoline--last ""           "Последняя отображённая строка.")
-(defvar taoline--saved-ml nil      "Backup of the original mode-line.")
-(defvar taoline--posframe-name " *taoline-posframe*" "Имя posframe буфера.")
+(defface taoline-time-face
+  '((t :inherit success))
+  "Face for time segment."
+  :group 'taoline)
 
-(defvar taoline--clock-timer nil   "Таймер тиканья часов.")
-(defvar taoline--last-clock ""     "Последняя отрисованная строка времени.")
+(defface taoline-buffer-face
+  '((t :inherit mode-line-buffer-id))
+  "Face for buffer name segment."
+  :group 'taoline)
 
-;;;; helpers --------------------------------------------------------
+(defface taoline-modified-face
+  '((t :inherit warning))
+  "Face for modified indicator segment."
+  :group 'taoline)
 
-(defun taoline--git-branch ()
-  "Return \":branch\" or \"\" if not in git repo."
-  (when (and (executable-find "git")
-             (locate-dominating-file default-directory ".git"))
-    (let* ((cmd "git symbolic-ref --quiet --short HEAD 2>/dev/null")
-           (branch (string-trim (shell-command-to-string cmd))))
-      (if (string-empty-p branch) ""
-        (propertize (concat ":" branch) 'face 'italic)))))
+(defface taoline-git-face
+  '((t :inherit font-lock-keyword-face))
+  "Face for git branch segment."
+  :group 'taoline)
 
-(defun taoline--battery-string ()
-  "Return battery icon and percentage, or empty string if unavailable."
-  (when (and (featurep 'all-the-icons)
-             (functionp battery-status-function))
-    (let* ((data (ignore-errors (funcall battery-status-function)))
-           (percent-str (or (cdr (assoc "percentage" data))
-                            (cdr (assoc 112 data))       ; ?p
-                            (cdr (assoc ?p data)))))
-      (when (and percent-str (string-match-p "^[0-9]+$" percent-str))
-        (let* ((percent (string-to-number percent-str))
-               (icon
-                (cond
-                 ((>= percent 95) (all-the-icons-faicon "battery-full"         :height 0.95 :v-adjust -0.05))
-                 ((>= percent 70) (all-the-icons-faicon "battery-three-quarters" :height 0.95 :v-adjust -0.05))
-                 ((>= percent 45) (all-the-icons-faicon "battery-half"         :height 0.95 :v-adjust -0.05))
-                 ((>= percent 20) (all-the-icons-faicon "battery-quarter"      :height 0.95 :v-adjust -0.05))
-                 (t                (all-the-icons-faicon "battery-empty"       :height 0.95 :v-adjust -0.05))))
-               (text (format "%s %s%%" icon percent)))
-          text)))))
+(defface taoline-mode-face
+  '((t :inherit font-lock-type-face))
+  "Face for major mode segment."
+  :group 'taoline)
 
-(defun taoline--segment->plist (seg)
-  "Преобразовать SEG в внутренний plist.
+;; ----------------------------------------------------------------------------
+;; Internal tables and state
 
-SEG может быть:
-1. В «простом» формате (NAME . FORMAT), к примеру
-     (time . \"HH:MM\")
-2. В «подробном» формате (FORMAT ARGS PROPS &optional EXTRA)
-   – исторически использовавшийся в taoline.
+(defvar taoline--segment-table (make-hash-table :test 'eq)
+  "Table for registered taoline segment functions.")
 
-Возвращаемый plist содержит ключи
- :format, :args, :props, :float, :predicate."
-  (cond
-   ;; ────────────────────────────────────────────────────────────────
-   ;; Новый/простой формат: (NAME . FORMAT)
-   ((and (consp seg) (stringp (cdr seg)))
-    (let* ((name       (car seg))
-           (raw-fmt    (cdr seg))
-           ;; Подставляем разумные значения для известных сегментов ― вместо
-           ;; статичных «BAT», «FILENAME», «MODE», «HH:MM» получаем живые данные.
-           (spec       (pcase name
-                         ('battery  (list "%s"
-                                          '((taoline--battery-string))
-                                          '(:face taoline-battery-face)))
-                         ('filename (list "%s"
-                                          '((taoline--filename-string))
-                                          '(:face taoline-filename-face)))
-                         ('mode     (list "%s"
-                                          '((format-mode-line mode-name))
-                                          '(:face mode-line-emphasis)))
-                         ('time     (list "%s"
-                                          '((format-time-string "%H:%M"))
-                                          '(:face taoline-time-face)))
-                         (_         nil)))
-           (fmt        (or (car  spec) raw-fmt))
-           (args       (or (cadr spec) nil))
-           ;; По умолчанию все сегменты располагаются слева.
-           (float nil))
-      (list :format fmt
-            :args   args
-            :props  nil
-            :float  float
-            :predicate nil)))
-   ;; ────────────────────────────────────────────────────────────────
-   ;; Старый/подробный формат
-   (t
-    (let* ((fmt   (nth 0 seg))
-           (args  (nth 1 seg))
-           (props (nth 2 seg))
-           (extra (and (> (length seg) 3) (nth 3 seg))))
-      (list :format fmt
-            :args   args
-            :props  props
-            :float  (when (and (listp extra) (plist-get extra :float))
-                      (plist-get extra :float))
-            :predicate (when (functionp extra) extra))))))
+(defvar taoline--last-str ""
+  "Cache for the last rendered modeline string.")
 
-(defun taoline--segment-eval (segment)
-  "Сформировать текст сегмента SEGMENT (plist).
-Вернёт plist (:string, :float), либо nil если сегмент не должен отображаться."
-  (let* ((fmt   (plist-get segment :format))
-         (args  (plist-get segment :args))
-         (props (plist-get segment :props))
-         (float (or (plist-get segment :float) 'left))
-         (pred  (plist-get segment :predicate))
-         (show? (or (null pred) (funcall pred)))
-         (txt (and show? (apply #'format fmt (mapcar #'eval args)))))
-    (when (and txt (not (string-empty-p txt)))
-      (when props (add-text-properties 0 (length txt) props txt))
-      (list :string txt :float float))))
+(defvar taoline--active-backend nil
+  "Currently active backend symbol.")
 
-(defun taoline--compose ()
-  "Собрать итоговую строку taoline: все сегменты аккумулируются, правая часть подгоняется по ширине.
-Гарантирует однострочность (без перевода строки и табов)."
-  (let* ((segments (mapcar #'taoline--segment->plist taoline-segments))
-         (plists   (delq nil (mapcar #'taoline--segment-eval segments)))
-         (lefts    (seq-filter (lambda (x) (eq (plist-get x :float) 'left)) plists))
-         (rights   (seq-filter (lambda (x) (eq (plist-get x :float) 'right)) plists))
-         (left-str  (mapconcat (lambda (x) (plist-get x :string)) lefts ""))
-         (right-str (mapconcat (lambda (x) (plist-get x :string)) rights ""))
-         (fw (frame-width (selected-frame)))
-         (padding (max 1 (- fw
-                            (string-width left-str)
-                            (string-width right-str)
-                            taoline-time-right-margin)))
-         (line (if (string-empty-p right-str)
-                   left-str
-                 (concat left-str (make-string padding ?\s) right-str))))
-    (replace-regexp-in-string "[\n\r\t]+" " " line)))
+(defvar taoline--backend-data nil
+  "Backend data for teardown or cleanup.")
 
+;; ----------------------------------------------------------------------------
+;; Segment definition and segment API
 
+(defmacro taoline-define-segment (name args &rest body)
+  "Define a segment function NAME accepting ARGS, with BODY.
+Registers the NAME in the segment table."
+  (declare (indent defun))
+  `(progn
+     (defun ,name ,args ,@body)
+     (puthash ',name #',name taoline--segment-table)))
 
-(defun taoline--ready-p ()
-  "Whether echo-area is currently free for our message."
-  (and (not (active-minibuffer-window))
-       (null (current-message))))
+(defun taoline--apply-segment (fn buffer)
+  "Call segment FN with BUFFER."
+  (condition-case err
+      (funcall fn buffer)
+    (error (propertize (format "[SEGMENT ERROR: %s]" err) 'face 'error))))
 
-;;;; backend: echo-area ---------------------------------------------
+(defun taoline--collect-segments (side buffer)
+  "For SIDE (:left/:right), collect and evaluate segment functions for BUFFER."
+  (let ((fns (cdr (or (assq side taoline-segments) ())))
+        (results '()))
+    (dolist (fn fns)
+      (push (taoline--apply-segment fn buffer) results))
+    (nreverse results)))
 
-(defun taoline-echo-setup () nil)
+;; ----------------------------------------------------------------------------
+;; Core: Compose functionally the modeline string
 
-(defun taoline-echo-display (str)
-  (let* ((oneline (taoline--pad-to-frame-width str))
-         (message-log-max nil))
-    (message "%s" oneline)))
+(defun taoline-compose-modeline (&optional buffer frame)
+  "Pure function: compose modeline string for BUFFER and FRAME."
+  (let* ((buffer (or buffer (current-buffer)))
+         (frame (or frame (selected-frame)))
+         (width (frame-width frame))
+         (left (string-join (taoline--collect-segments :left buffer) " "))
+         (right (string-join (taoline--collect-segments :right buffer) " "))
+         (mid-space (max 1 (- width (string-width left) (string-width right)))))
+    (concat
+     (propertize left 'face 'taoline-base-face)
+     (make-string mid-space ?\s)
+     (propertize right 'face 'taoline-base-face))))
 
-(defun taoline-echo-teardown ()
-  (message nil))
+;; ----------------------------------------------------------------------------
+;; Built-in segments
 
-;;;; backend: header-line -------------------------------------------
+(taoline-define-segment taoline-segment-time (buffer)
+  "Display current time."
+  (propertize (format-time-string "%H:%M")
+              'face 'taoline-time-face))
 
-(defvar taoline--header-cache "")
+(taoline-define-segment taoline-segment-buffer-name (buffer)
+  "Display current buffer name, with * if modified."
+  (let* ((name (buffer-name buffer))
+         (mod (if (buffer-modified-p buffer) "*" "")))
+    (concat
+     (propertize name 'face 'taoline-buffer-face)
+     (when (buffer-modified-p buffer)
+       (propertize "*" 'face 'taoline-modified-face)))))
 
-(defun taoline-header-setup ()
-  (setq taoline--saved-ml mode-line-format)
-  (set (make-local-variable 'header-line-format)
-       '(:eval taoline--header-cache))
-  (setq-default mode-line-format nil))
+(taoline-define-segment taoline-segment-major-mode (buffer)
+  "Display the major mode."
+  (propertize (format-mode-line mode-name)
+              'face 'taoline-mode-face))
 
-(defun taoline--truncate-to-frame-width (str)
-  "Truncate STR so its display width fits exactly in current frame,
-never exceeding one screen line (avoiding soft-wraps and multi-line header-line)."
-  (let* ((fw (frame-width (selected-frame))))
-    (truncate-string-to-width str fw 0 ?\s)))
+;; Simple git branch detector; can be redefined by user
+(taoline-define-segment taoline-segment-git-branch (buffer)
+  "Display current git branch, if any."
+  (let* ((default-directory (or (buffer-local-value 'default-directory buffer) default-directory))
+         (branch (when (and default-directory (fboundp 'vc-git-root))
+                   (let ((root (ignore-errors (vc-git-root default-directory))))
+                     (when root
+                       (with-temp-buffer
+                         (let* ((git-dir (expand-file-name ".git/HEAD" root)))
+                           (when (file-readable-p git-dir)
+                             (insert-file-contents git-dir)
+                             (when (re-search-forward "ref: refs/heads/\\(.*\\)" nil t)
+                               (match-string 1))))))))))
+    (if branch
+        (propertize (concat " " branch) 'face 'taoline-git-face)
+      "")))
 
-(defun taoline-header-display (str)
-  (let ((oneline (taoline--pad-to-frame-width str)))
-    (unless (equal oneline taoline--header-cache)
-      (setq taoline--header-cache oneline)
-      (force-mode-line-update t))))
+;; ----------------------------------------------------------------------------
+;; Backend registry
 
-(defun taoline-header-teardown ()
-  (setq-default mode-line-format taoline--saved-ml)
-  (setq header-line-format nil)
+(defvar taoline--backend-table
+  '((modeline . ((setup . taoline--modeline-setup)
+                 (update . taoline--modeline-update)
+                 (teardown . taoline--modeline-teardown)))
+    (echo    . ((setup . taoline--echo-setup)
+                (update . taoline--echo-update)
+                (teardown . taoline--echo-teardown)))
+    (header  . ((setup . taoline--header-setup)
+                (update . taoline--header-update)
+                (teardown . taoline--header-teardown)))
+    (posframe . ((setup . taoline--posframe-setup)
+                 (update . taoline--posframe-update)
+                 (teardown . taoline--posframe-teardown))))
+  "Backend function registry.")
+
+;; -- Modeline backend (in-window modeline)
+
+(defvar-local taoline--modeline-old nil)
+(defvar-local taoline--modeline-expression nil)
+
+(defun taoline--modeline-setup ()
+  "Setup for `modeline' backend.
+Прячет обычный `mode-line-format' (сохранив в
+`taoline--saved-mode-line-format') и устанавливает собственную
+Taoline-строку."
+  (taoline--hide-default-mode-line)
+  "Setup taoline as the current window's modeline."
+  (unless taoline--modeline-old
+    (setq taoline--modeline-old (default-value 'mode-line-format)))
+  (setq taoline--modeline-expression
+        '(:eval (taoline-compose-modeline)))
+  (setq mode-line-format taoline--modeline-expression))
+
+(defun taoline--modeline-update (_str)
+  "Force update of the modeline."
   (force-mode-line-update t))
 
-;;;; backend: child-frame (posframe) --------------------------------
+(defun taoline--modeline-teardown ()
+  "Teardown for `modeline' backend.
+Убирает Taoline из `mode-line-format' и восстанавливает сохранённый
+пользовательский mode-line."
+  (taoline--restore-default-mode-line)
+  "Restore previous mode-line-format."
+  (when taoline--modeline-old
+    (setq mode-line-format taoline--modeline-old)
+    (setq taoline--modeline-old nil)
+    (setq taoline--modeline-expression nil)))
 
-(defun taoline--pad-to-frame-width (str)
-  "Collapse STR to a single visual line and pad it on the right so
-its display width is *at least* the current frame width.
+;; -- Echo area backend
 
-The function NEVER removes faces or other text properties and it
-NEVER TRUNCATES the string; if STR is already wider than the
-frame it is returned unchanged.  Newlines, carriage returns and
-tabs are replaced with a single space."
-  (let* ((fw (frame-width (selected-frame)))
-         (clean (replace-regexp-in-string "[\n\r\t]+" " " (or str "")))
-         (w (string-width clean)))
-    (when (< w fw)
-      (setq clean (concat clean (make-string (- fw w) ?\s))))
-    clean))
+(defgroup taoline nil
+  "Slim, extensible, functional mode-line for Emacs."
+  :group 'convenience)
 
-(defun taoline--posframe-show (str)
-  "Show STR in a stable child-frame stuck to the bottom edge of PARENT.
-Faces, icons, single-line guarantee, no right-edge gap or clipping."
-  (let* ((parent  (selected-frame))
-         (fw      (frame-width parent))
-         (oneline (taoline--pad-to-frame-width str))
-         ;; Apply a face to everything for unified vertical alignment in posframe
-         (_ (add-face-text-property 0 (length oneline) 'taoline-posframe-face nil oneline))
-         (w       (string-width oneline))           ; real width
-         (w*      (max fw w)))                      ; never smaller than frame
-    (with-current-buffer (get-buffer-create taoline--posframe-name)
-      (let ((inhibit-read-only t))
-        (erase-buffer)
-        (insert oneline)))
-    (posframe-show taoline--posframe-name
-                   :string nil                      ;; use buffer instead!
-                   
-                   :poshandler #'posframe-poshandler-frame-bottom-left-corner
-                   :min-width w*
-                   :max-width w*
-                   :width     w*
-                   :min-height 1
-                   :max-height 1
-                   :internal-border-width 0
-                   ;; NO :no-properties t!
-                   :background-color (face-attribute 'mode-line :background nil t)
-                   :override-parameters (copy-sequence taoline-child-frame-parameters))))
+(defcustom taoline-debug t
+  "If non-nil, taoline logs to the *taoline-logs* buffer instead of/in addition to *Messages*."
+  :type 'boolean
+  :group 'taoline)
 
-(defun taoline-posframe-setup ()
-  (unless (require 'posframe nil t)
-    (user-error "posframe backend requested but package ‘posframe’ not found"))
-  ;; hide original mode-line
-  (setq taoline--saved-ml mode-line-format)
-  (setq-default mode-line-format nil)
-  ;; initial invisible frame
-  (taoline--posframe-show "")
-  (posframe-hide taoline--posframe-name))
+(defvar taoline--log-buffer "*taoline-logs*"
+  "Buffer name for taoline debug log.")
 
-(defun taoline-posframe-display (str)
-  (if (active-minibuffer-window)             ; не мешать вводу
-      (posframe-hide taoline--posframe-name)
-    (taoline--posframe-show str)))
+(defun taoline--log (fmt &rest args)
+  "Log message FMT with ARGS to `taoline--log-buffer' if `taoline-debug' is non-nil.
+Lines are appended at the end of the buffer, which is auto-created.
+Never writes debug to *Messages*."
+  (when taoline-debug
+    (let ((msg (apply #'format fmt args)))
+      (with-current-buffer (get-buffer-create taoline--log-buffer)
+        (goto-char (point-max))
+        (insert msg "\n")))))
 
-(defun taoline-posframe-teardown ()
-  (posframe-delete taoline--posframe-name)
-  (setq-default mode-line-format taoline--saved-ml)
+(defvar taoline--echo-postcmd-hooked nil
+  "Internal: Whether taoline echo post-command refresh is enabled.")
+
+(defvar taoline--echo-minibuf-hooked nil
+  "Internal: Whether taoline echo minibuffer exit refresh is enabled.")
+
+(defvar taoline--echo-clear-hooked nil
+  "Internal: Whether taoline echo `echo-area-clear-hook' refresh is enabled (Emacs 29+).")
+
+(defun taoline--echo-refresh-if-empty ()
+  "Show taoline in the echo area if minibuffer is gone and echo area is empty or contains only whitespace.
+Hide taoline only when something meaningful (not just whitespace) is in the echo area,
+or when minibuffer is active or minibuffer input is ongoing.
+Adds debug output to *taoline-logs* if debugging is enabled."
+  (let* ((taoline-debug-info
+          (list
+           :taoline-mode taoline-mode
+           :active-backend taoline--active-backend
+           :display-backend taoline-display-backend
+           :active-minibuffer (active-minibuffer-window)
+           :current-message (current-message))))
+    (taoline--log "[taoline echo-debug] refresh: %S" taoline-debug-info)
+    (when (and taoline-mode
+               (eq taoline--active-backend 'echo)
+               (not (active-minibuffer-window)))
+      (let ((msg (current-message)))
+        (taoline--log "[taoline echo-debug] mini='%s'" msg)
+        (if (or (null msg)
+                (string-match-p "\\`[ \t\n\r]*\\'" msg))
+            (progn
+              (taoline--log "[taoline echo-debug] minibuffer is empty, refreshing taoline (run-at-time)")
+              (run-at-time 0 nil
+                           (lambda ()
+                             (taoline--log "[taoline echo-debug] (delayed) calling taoline--maybe-update")
+                             (taoline--maybe-update))))
+          (taoline--log "[taoline echo-debug] minibuffer not empty, taoline not shown"))))))
+
+(defun taoline--echo-minibuffer-exit-refresh ()
+  "Hook for minibuffer-exit to restore taoline if needed."
+  (run-at-time 0.05 nil #'taoline--echo-refresh-if-empty))
+
+(defun taoline--echo-clear-refresh ()
+  "Hook for `echo-area-clear-hook' (Emacs 29+) to restore Taoline
+немедленно, как только echo-area становится пустой."
+  (taoline--log "[taoline echo-debug] echo-area-clear-hook triggered")
+  (when (and taoline-mode
+             (eq taoline--active-backend 'echo)
+             (not (active-minibuffer-window)))
+    ;; Прямой вызов без таймера, чтобы не было заметной задержки.
+    (taoline--maybe-update)))
+
+(defun taoline--echo-setup ()
+  ;; Ensure echo restoring logic is installed
+  (unless taoline--echo-postcmd-hooked
+    (add-hook 'post-command-hook #'taoline--echo-refresh-if-empty))
+  (setq taoline--echo-postcmd-hooked t)
+
+  (unless taoline--echo-minibuf-hooked
+    (add-hook 'minibuffer-exit-hook #'taoline--echo-minibuffer-exit-refresh))
+  (setq taoline--echo-minibuf-hooked t)
+
+  ;; Emacs 29+: используем echo-area-clear-hook для мгновенного восстановления
+  (when (and (boundp 'echo-area-clear-hook)
+             (not taoline--echo-clear-hooked))
+    (add-hook 'echo-area-clear-hook #'taoline--echo-clear-refresh)
+    (setq taoline--echo-clear-hooked t))
+
+  (taoline--log "[taoline echo-debug] echo-setup: run initial refresh")
+  ;; Небольшая задержка для первого показа, чтобы не мешать стартовым сообщениям
+  (run-at-time 0.01 nil #'taoline--echo-refresh-if-empty))
+
+(defun taoline--echo-update (str)
+  "Update echo area with STR if minibuffer is not active.
+No debug/trace output goes to the minibuffer or *Messages*; debug stays in *taoline-logs* only.
+НИКОГДА не писать taoline в echo если buffer спецбуфер ИЛИ str пустой."
+  (let ((active-minibuffer (active-minibuffer-window)))
+    (taoline--log "[taoline echo-debug] echo-update: active-minibuffer=%S str='%s'"
+                   active-minibuffer str)
+    (when (and (not active-minibuffer)
+               (stringp str)
+               (not (string-prefix-p "*" (buffer-name (current-buffer))))
+               (not (equal str "")))
+      (let ((message-log-max nil)) (message "%s" str)))))
+
+(defun taoline--echo-teardown ()
+  (when taoline--echo-postcmd-hooked
+    (remove-hook 'post-command-hook #'taoline--echo-refresh-if-empty)
+    (setq taoline--echo-postcmd-hooked nil))
+  (when taoline--echo-minibuf-hooked
+    (remove-hook 'minibuffer-exit-hook #'taoline--echo-minibuffer-exit-refresh)
+    (setq taoline--echo-minibuf-hooked nil))
+  (when (and taoline--echo-clear-hooked (boundp 'echo-area-clear-hook))
+    (remove-hook 'echo-area-clear-hook #'taoline--echo-clear-refresh)
+    (setq taoline--echo-clear-hooked nil))
+  (let ((msg (current-message)))
+    (when (or (null msg)
+              (string-match-p "\\`[ \t\n\r]*\\'" msg))
+      (message ""))))
+
+;; -- Header line backend
+
+(defvar-local taoline--header-old nil)
+(defvar-local taoline--header-expression nil)
+
+(defun taoline--header-setup ()
+  (unless taoline--header-old
+    (setq taoline--header-old (default-value 'header-line-format)))
+  (setq taoline--header-expression
+        '(:eval (taoline-compose-modeline)))
+  (setq header-line-format taoline--header-expression))
+
+(defun taoline--header-update (_str)
   (force-mode-line-update t))
 
-;;;; backend dispatch table -----------------------------------------
+(defun taoline--header-teardown ()
+  (when taoline--header-old
+    (setq header-line-format taoline--header-old)
+    (setq taoline--header-old nil)
+    (setq taoline--header-expression nil)))
 
-(cl-defun taoline--dispatch (action)
-  (pcase taoline-display-backend
-    ('echo-area   (pcase action
-                    ('setup    (taoline-echo-setup))
-                    ('display  #'taoline-echo-display)
-                    ('teardown (taoline-echo-teardown))))
-    ('header-line (pcase action
-                    ('setup    (taoline-header-setup))
-                    ('display  #'taoline-header-display)
-                    ('teardown (taoline-header-teardown))))
-    ('child-frame (pcase action
-                    ('setup    (taoline-posframe-setup))
-                    ('display  #'taoline-posframe-display)
-                    ('teardown (taoline-posframe-teardown))))
-    (_ (error "Unknown backend %s" taoline-display-backend))))
+;; -- Posframe backend
 
-;;;; core update ----------------------------------------------------
+(defvar taoline--posframe-buffer " *taoline-posframe*")
+(defvar taoline--posframe-name "taoline-posframe")
 
-(defun taoline--update ()
-  "Main update entry point hooked into post-command or timer.
-Всегда обновляет строку, если она изменилась по содержимому (не только по действию пользователя)."
-  (let* ((raw (taoline--compose))
-         (new (taoline--apply-time-alignment raw)))
-    (unless (equal new taoline--last)
-      (setq taoline--last new)
-      (funcall (taoline--dispatch 'display) new))))
+(defun taoline--posframe-setup ()
+  (require 'posframe)
+  (posframe-delete taoline--posframe-buffer))
 
+(defun taoline--posframe-update (str)
+  (require 'posframe)
+  (let* ((width (frame-width))
+         (height 1)
+         (params '((left-fringe . 8) (right-fringe . 8))))
+    (posframe-show
+     taoline--posframe-buffer
+     :string str
+     :name taoline--posframe-name
+     :poshandler 'posframe-poshandler-frame-bottom-center
+     :min-width width
+     :min-height height
+     :border-width 0
+     :override-parameters params)))
 
+(defun taoline--posframe-teardown ()
+  (ignore-errors
+    (require 'posframe)
+    (posframe-delete taoline--posframe-buffer)))
 
+;; ----------------------------------------------------------------------------
+;; Backend dispatcher
 
-(defun taoline--clock-tick ()
-  "Фоновое обновление для тикающих часов. Проверяет, изменилась ли секунда - если да, обновляет строку."
-  (let* ((raw (taoline--compose))
-         (new (taoline--apply-time-alignment raw)))
-    (unless (equal new taoline--last-clock)
-      (setq taoline--last-clock new)
-      (taoline--update))))
+(defun taoline--get-backend (backend)
+  (alist-get backend taoline--backend-table))
 
-;; -------------------------------------------------------------------
-;; helpers ------------------------------------------------------------
-;; (removed duplicate taoline--battery-string to allow the icon-based version above to be used)
+(defun taoline--backend-setup (backend)
+  (taoline--log "[taoline debug] backend-setup: %S" backend)
+  (let ((b (taoline--get-backend backend)))
+    (when b (funcall (alist-get 'setup b)))))
 
-(defun taoline--filename-string ()
-  "Return a short name for the current buffer.
-Prefer `buffer-file-name' stripped of its directory, fall back to `buffer-name'."
-  (if buffer-file-name
-      (file-name-nondirectory buffer-file-name)
-    (buffer-name)))
-(defun taoline--cancel-all-clock-timers ()
-  "Cancel every active timer that calls `taoline--clock-tick'.
-Also reset `taoline--clock-timer' to nil."
-  (dolist (tm (copy-sequence timer-list)) ; `timer-list' is Emacs-internal
-    (when (and (timerp tm)
-               (eq (timer--function tm) #'taoline--clock-tick))
-      (cancel-timer tm)))
-  (when (timerp taoline--clock-timer)
-    (cancel-timer taoline--clock-timer))
-  (setq taoline--clock-timer nil))
+(defun taoline--backend-update (backend str)
+  (taoline--log "[taoline debug] backend-update: backend=%s, str='%s'" backend str)
+  (let ((b (taoline--get-backend backend)))
+    (when b (funcall (alist-get 'update b) str))))
 
-(defconst taoline--hooks
-  '(post-command-hook
-    window-configuration-change-hook
-    focus-in-hook
-    frame-size-change-functions))
+(defun taoline--backend-teardown (backend)
+  (taoline--log "[taoline debug] backend-teardown: %S" backend)
+  (let ((b (taoline--get-backend backend)))
+    (when b (funcall (alist-get 'teardown b)))))
+
+(defun taoline--set-backend (backend)
+  "Switch to BACKEND, handling setup/teardown **и** правильное
+скрытие / восстановление обычного mode-line через backend-функции."
+  (taoline--log "[taoline debug] set-backend called: %S" backend)
+  (setq taoline-display-backend backend)
+  (unless (eq backend taoline--active-backend)
+    (when taoline--active-backend
+      (taoline--log "[taoline debug] backend-teardown: %S" taoline--active-backend)
+      (taoline--backend-teardown taoline--active-backend))
+    (taoline--backend-setup backend)
+    (setq taoline--active-backend backend)
+    (setq taoline--last-str ""))) ;; force refresh
+
+;; ----------------------------------------------------------------------------
+;; Core update logic
+
+(defun taoline--maybe-update ()
+  "Compose and update modeline if changed, or if echo area is empty (for echo backend).
+Debugs all observable modeline update events to *taoline-logs* if debugging is enabled.
+SKIP taoline update for internal/special buffers (starting with *).
+In echo mode: ALWAYS refresh into echo area if it is empty or whitespace (even if string does not change).
+"
+  (unless (or (string-prefix-p "*" (buffer-name (current-buffer)))
+              (minibufferp (current-buffer)))
+    (when taoline--active-backend
+      (let ((str (taoline-compose-modeline)))
+        (cond
+         ((eq taoline--active-backend 'echo)
+          (let ((msg (current-message))
+                (active-mini (active-minibuffer-window)))
+            (cond
+             (active-mini
+              (taoline--log "[taoline debug] maybe-update: echo area NOT updated (active minibuffer) '%s'" str))
+             ((or (not (equal str taoline--last-str))
+                  (null msg)
+                  (string-match-p "\\`[ \t\n\r]*\\'" (or msg "")))
+              (taoline--log "[taoline debug] maybe-update: backend=echo will update (changed or echo empty, and minibuffer not active): '%s'" str)
+              (taoline--backend-update taoline--active-backend str)
+              (setq taoline--last-str str))
+             (t
+              (taoline--log "[taoline debug] maybe-update: not updating (echo in use, unchanged) '%s'" str)))))
+         (t
+          (unless (equal str taoline--last-str)
+            (taoline--log "[taoline debug] maybe-update: backend=%s will update: '%s'"
+                           taoline--active-backend str)
+            (taoline--backend-update taoline--active-backend str)
+            (setq taoline--last-str str))
+          (when (equal str taoline--last-str)
+            (taoline--log "[taoline debug] maybe-update: not updating (string unchanged) '%s'" str))))))))
 
 (defun taoline--add-hooks ()
-  (mapc (lambda (hook)
-          (add-hook hook #'taoline--update))
-        taoline--hooks))
+  (dolist (hk taoline-update-hooks)
+    (add-hook hk #'taoline--maybe-update))
+  (when (eq taoline-display-backend 'echo)
+    (add-hook 'post-command-hook #'taoline--echo-refresh-if-empty))
+  (taoline--log "[taoline debug] hooks enabled, backend=%s hooks=%S"
+           taoline-display-backend taoline-update-hooks))
 
 (defun taoline--remove-hooks ()
-  (mapc (lambda (hook)
-          (remove-hook hook #'taoline--update))
-        taoline--hooks))
+  (dolist (hk taoline-update-hooks)
+    (remove-hook hk #'taoline--maybe-update))
+  ;; Extra cleanup for echo backend edge-case
+  (remove-hook 'post-command-hook #'taoline--echo-refresh-if-empty)
+  (taoline--log "[taoline debug] hooks removed, backend=%s" taoline-display-backend))
 
-(defun taoline--restore-mode-line ()
-  "Восстановить mode-line во всех буферах функционально."
-  (mapc (lambda (buf)
-          (with-current-buffer buf
-            (cond
-             ((and (local-variable-p 'mode-line-format) taoline--saved-ml)
-              (setq-local mode-line-format taoline--saved-ml))
-             ((and (local-variable-p 'mode-line-format)
-                   (or (null mode-line-format)
-                       (equal mode-line-format "")))
-              (kill-local-variable 'mode-line-format)))))
-        (buffer-list))
-  (setq-default mode-line-format
-                (or taoline--saved-ml
-                    (get 'mode-line-format 'standard-value)))
-  (setq taoline--saved-ml nil))
+;; ----------------------------------------------------------------------------
+;; Mode-line hiding / restoration helpers
 
-(defun taoline--wipe-cache ()
-  "Сброс кэшированных значений строки."
-  (setq taoline--last "")
-  (setq taoline--last-clock ""))
+(defvar taoline--saved-mode-line-format nil
+  "Backup of the original `mode-line-format` before `taoline-mode` hides it.")
+
+(defun taoline--hide-default-mode-line ()
+  "Hide the regular mode-line, saving its original value.
+The original value is stored in `taoline--saved-mode-line-format' and
+applied to all existing buffers as well as the default for future ones."
+  (unless taoline--saved-mode-line-format
+    (setq taoline--saved-mode-line-format (default-value 'mode-line-format))
+    ;; Hide for future buffers
+    (setq-default mode-line-format nil)
+    ;; Hide for every currently live buffer
+    (dolist (buf (buffer-list))
+      (with-current-buffer buf
+        (setq mode-line-format nil)))))
+
+(defun taoline--restore-default-mode-line ()
+  "Restore the regular mode-line that was saved by `taoline--hide-default-mode-line'."
+  (when taoline--saved-mode-line-format
+    ;; Restore for future buffers
+    (setq-default mode-line-format taoline--saved-mode-line-format)
+    ;; Restore for every existing buffer
+    (dolist (buf (buffer-list))
+      (with-current-buffer buf
+        (setq mode-line-format taoline--saved-mode-line-format)))
+    (setq taoline--saved-mode-line-format nil)))
+
+;; ----------------------------------------------------------------------------
+;; Minor mode
 
 ;;;###autoload
 (define-minor-mode taoline-mode
-  "Global minor-mode providing slim modeline proxy."
+  "Global taoline minor mode."
   :global t
-  :lighter ""
+  (when (called-interactively-p 'any)
+    (taoline--log "[taoline debug] taoline-mode state: %s backend: %S"
+                   (if taoline-mode "ENABLED" "DISABLED")
+                   taoline-display-backend))
   (if taoline-mode
       (progn
-        (unless taoline--saved-ml
-          (setq taoline--saved-ml mode-line-format))
-        (mapc (lambda (win)
-                (with-selected-window win
-                  (setq-local mode-line-format nil)))
-              (window-list))
-        (taoline--dispatch 'setup)
+        (unless (eq taoline--active-backend taoline-display-backend)
+          (taoline--log "[taoline debug] SYNCING backend! was %S now %S"
+                         taoline--active-backend taoline-display-backend)
+          (setq taoline--active-backend nil))
+        (taoline--set-backend taoline-display-backend)
         (taoline--add-hooks)
-        ;; Убедимся, что от прежних версий не осталось "висячих" таймеров
-        (taoline--cancel-all-clock-timers)
-        (setq taoline--clock-timer
-              (run-with-timer 0 1 #'taoline--clock-tick)))
-    (progn
-      (taoline--remove-hooks)
-      (taoline--dispatch 'teardown)
-      (taoline--restore-mode-line)
-      (taoline--wipe-cache)
-      (taoline--cancel-all-clock-timers)
-      (message nil)
-      (force-mode-line-update t)
-      (redraw-display))))
-
+        (taoline--maybe-update))
+    (taoline--remove-hooks)
+    (when taoline--active-backend
+      (taoline--backend-teardown taoline--active-backend)
+      (setq taoline--active-backend nil))
+    ;; Restore the original mode-line for the user
+    (taoline--restore-default-mode-line)))
 
 ;;;###autoload
-(defun taoline-set-backend (backend)
-  "Interactively switch BACKEND (echo-area, child-frame, header-line)."
+(defun taoline-set-backend (bk)
+  "Select BK as the Taoline backend.
+
+If `taoline-mode' is currently active, switch immediately
+(handling teardown/setup).  If the mode is disabled, just remember
+the choice so that the same backend is used the next time the mode
+is enabled."
   (interactive
-   (list (intern (completing-read "Backend: "
-                                  '(echo-area child-frame header-line)
-                                  nil t))))
-  (unless (eq backend taoline-display-backend)
-    (setq taoline-display-backend backend)
-    (when taoline-mode
-      ;; reinit backend on the fly
-      (taoline--dispatch 'teardown)
-      (setq taoline--last "")
-      (taoline--dispatch 'setup)
-      (taoline--update))))
+   (list
+    (intern
+     (completing-read
+      "Backend: "
+      (mapcar (lambda (cell) (symbol-name (car cell))) taoline--backend-table)
+      nil t nil nil (symbol-name taoline-display-backend)))))
+  (setq taoline-display-backend bk)
+  (if taoline-mode
+      (progn
+        (unless (eq taoline--active-backend bk)
+          (taoline--set-backend bk)
+          (taoline--maybe-update)))
+    (message "Taoline backend set to %s (will activate when taoline-mode is enabled)."
+             bk)))
 
-(defun taoline--apply-time-alignment (str)
-  "Return STR with the clock (HH:MM:SS) aligned flush right.
+;;;###autoload
+(defun taoline-add-segment (side fn)
+  "Add FN to SIDE (:left/:right) segments."
+  (let* ((cell (assq side taoline-segments))
+         (lst (if cell (cdr cell) ())))
+    (setf (alist-get side taoline-segments) (append lst (list fn)))))
 
-If `taoline-time-align-right' is nil or if STR does not contain the
-currently formatted time, return STR unchanged.
-
-Otherwise the current time is removed from its original place and
-padded so that it ends at the right edge of the current frame,
-leaving `taoline-time-right-margin' spaces between the clock and
-the frame edge."
-  (if (not taoline-time-align-right)
-      str
-    (let* ((clock-str (format-time-string "%H:%M:%S"))
-           (pos (string-match (regexp-quote clock-str) str)))
-      (if (not pos)
-          str
-        (let* ((left        (concat (substring str 0 pos)
-                                    (substring str (+ pos (length clock-str)))))
-               (frame-width (frame-width (selected-frame)))
-               (padding     (max 1 (- frame-width
-                                      (string-width left)
-                                      (string-width clock-str)
-                                      taoline-time-right-margin))))
-          (concat left (make-string padding ?\s) clock-str))))))
 (provide 'taoline)
+
 ;;; taoline.el ends here
