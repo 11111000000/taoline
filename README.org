@@ -1,35 +1,99 @@
-* Taoline
+* Taoline: Minimalist Functional Modeline for Emacs
 
-#+BEGIN_VERSE
-For editing!
-#+END_VERSE
+Taoline – ультра-минималистичная и функциональная замена стандартной mode-line для Emacs. Вместо обилия информации на панелях, taoline показывает только нужные сведения в компактном виде — внизу окна, в echo area, в заголовке окна или даже в отдельной child-frame (через posframe). Вся архитектура построена на чистых функциях и предоставляет удобный функциональный API для расширения и тестирования.
 
-Taoline removes the modeline and replaces it with a slimmer proxy version, which displays some basic information in the echo area instead.  This information is only displayed if the echo area is not used for anything else (but if you switch frame/window, it will replace whatever message is currently displayed).
+** Основные возможности
 
-** Troubleshooting
+- Минималистичный внешний вид, неярко выделяясь и не отвлекая.
+- Полностью функциональный стиль: сегменты — это чистые функции, легко тестируемые и подменяемые.
+- Несколько бэкендов отображения: классическая modeline, echo area, header-line, posframe.
+- Не использует таймеров: обновляется только по хукам действий пользователя.
+- Удобное расширение: новые сегменты легко добавляются через макрос.
+- Cпециальный отладочный лог в buffer `*taoline-logs*` (если включён).
 
-Just toggle /taoline-mode/ on and then off (i.e. M-x taoline twice:).
+** Начало работы
 
-** Customizations
-
-There are some customizations available, check out
-
-#+BEGIN_SRC emacs-lisp
-(customize-group taoline)
-#+END_SRC
-
-to see what you can do. An example init snippet would look something like:
+Установка через straight.el, quelpa или package.el (ELPA/MELPA):
 
 #+BEGIN_SRC emacs-lisp
-(use-package    taoline
-  :ensure       t
-  :custom
-  (taoline-show-git-branch      t)
-  (taoline-show-dir             t)
-  (taoline-show-time            nil)
-  (taoline-show-previous-buffer nil)
+(use-package taoline
+  :ensure t
+  ;; :straight (:host github :repo "11111000000/taoline")
   :config
-  (taoline-mode t))
+  (taoline-mode 1))
 #+END_SRC
 
-** TODO Screenshots
+Включить режим можно командой:
+
+#+BEGIN_SRC emacs-lisp
+(taoline-mode 1)
+#+END_SRC
+
+** Настройка и расширение
+
+Все настройки доступны через
+
+#+BEGIN_SRC emacs-lisp
+(customize-group 'taoline)
+#+END_SRC
+
+или напрямую:
+
+*** Пример настройки сегментов и внешнего вида
+
+#+BEGIN_SRC emacs-lisp
+(setq taoline-segments
+      '((:left  taoline-segment-git-branch taoline-segment-buffer-name)
+        (:right taoline-segment-major-mode taoline-segment-time)))
+
+(setq taoline-display-backend 'echo) ;; варианты: 'modeline, 'echo, 'header, 'posframe
+#+END_SRC
+
+*** Смена способа отображения (backend) на лету
+
+Можно сменить способ отображения без выключения режима:
+
+#+BEGIN_SRC emacs-lisp
+(taoline-set-backend 'header)
+#+END_SRC
+
+*** Добавление пользовательского сегмента
+
+Все сегменты — чистые функции с сигнатурой (buffer) → string. Для регистрации нового сегмента используйте макрос:
+
+#+BEGIN_SRC emacs-lisp
+(taoline-define-segment taoline-segment-buffer-size (buffer)
+  "Показывает размер буфера."
+  (format "%.1fK" (/ (buffer-size buffer) 1024.0)))
+
+;; Добавить к правым сегментам
+(push 'taoline-segment-buffer-size (alist-get :right taoline-segments))
+#+END_SRC
+
+** FAQ
+
+- *Taoline отключил стандартную modeline, исчез индикатор записи/режимы!*  
+  <b>Это ожидаемо:</b> taoline полностью скрывает mode-line ради чистоты интерфейса. Используйте кастомные сегменты для возврата нужных индикаторов, если надо.
+
+- *Echo area «затирается» сообщениями Emacs!*
+  Taoline занимает echo area только если она пуста. Как только появляется пользовательское сообщение, taoline временно скрывается.
+
+- *Как вернуть обычную mode-line?*
+  Просто выключите taoline-mode командой <kbd>M-x taoline-mode</kbd>.
+
+** Разработка и вклад
+
+- Документация на GitHub: https://github.com/11111000000/taoline
+- Вся логика разбита на фунции и минимально зависит от состояния Emacs.
+- Для глубокого расширения: читайте исходный код, смотрите макросы и таблицу сегментов.
+
+** Пример скриншота
+
+#+ATTR_ORG: :width 80%
+[[file:screenshot-taoline.png]]
+
+** Лицензия
+
+MIT, © Peter, 11111000000@email.com
+
+
