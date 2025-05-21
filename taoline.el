@@ -41,7 +41,54 @@
   :group 'convenience
   :prefix "taoline-")
 
-;; ----------------------------------------------------------------------------
+;; -- Posframe backend (для всех окон и с шириной в окне)
+
+(defvar taoline--posframe-table (make-hash-table :test 'eq)
+  "Таблица posframe'ов по окнам.")
+
+(defun taoline--posframe-setup ()
+  "Показать posframe taoline во всех окнах."
+  (walk-windows
+   (lambda (win)
+     (taoline--posframe-show win))
+   nil t))
+
+(defun taoline--posframe-update (_str)
+  "Обновить posframe taoline для всех окон."
+  (walk-windows
+   (lambda (win)
+     (taoline--posframe-show win))
+   nil t))
+
+(defun taoline--posframe-teardown ()
+  "Убрать posframe taoline во всех окнах."
+  (maphash (lambda (_win pfname)
+             (ignore-errors (posframe-delete pfname)))
+           taoline--posframe-table)
+  (clrhash taoline--posframe-table))
+
+(defun taoline--posframe-show (win)
+  "Показать/обновить posframe в окне WIN."
+  (let* ((buffer (window-buffer win))
+         (width (window-width win))
+         (str (taoline-compose-modeline buffer win))
+         (pfname (intern (format " taoline-posframe-%s" (window-parameter win 'window-id)))))
+    (puthash win pfname taoline--posframe-table)
+    (posframe-show
+     pfname
+     :string str
+     :position (window-point win)
+     :parent-window win
+     :width width
+     :border-width 0
+     :background-color (face-attribute 'mode-line :background nil t))))
+
+;; ------------------------------------------------------
+
+;; Override backend switching logic to always teardown previous backend fully
+(defun taoline--activate-backend (backend)
+  "Activate BACKEND, ensuring all teardown for previous one (including posframe)."
+  (taoline--switch-backend backend))----------------------
 ;; Customizable variables
 
 (defcustom taoline-display-backend 'modeline
@@ -115,6 +162,17 @@ Supported values: 'modeline, 'echo, 'header, 'posframe"
 (defvar taoline--backend-data nil
   "Backend data for teardown or cleanup.")
 
+(defun taoline--switch-backend (new-backend)
+  "Switch to NEW-BACKEND. Teardown previous, setup new."
+  (when taoline--active-backend
+    (let* ((teardown (cdr (assq 'teardown (cdr (assq taoline--active-backend taoline--backend-table))))))
+      (when teardown (funcall teardown))))
+  (setq taoline--active-backend new-backend)
+  (let* ((setup (cdr (assq 'setup (cdr (assq taoline--active-backend taoline--backend-table)))))
+         (update (cdr (assq 'update (cdr (assq taoline--active-backend taoline--backend-table))))))
+    (when setup (funcall setup))
+    (setq taoline--backend-data (cons setup update))))
+
 ;; ----------------------------------------------------------------------------
 ;; Segment definition and segment API
 
@@ -143,18 +201,21 @@ Registers the NAME in the segment table."
 ;; ----------------------------------------------------------------------------
 ;; Core: Compose functionally the modeline string
 
-(defun taoline-compose-modeline (&optional buffer frame)
-  "Pure function: compose modeline string for BUFFER and FRAME."
+(defun taoline-compose-modeline (&optional buffer window)
+  "Pure function: compose modeline string for BUFFER and WINDOW.
+Если WINDOW не задан — используется выбранное окно."
   (let* ((buffer (or buffer (current-buffer)))
-         (frame (or frame (selected-frame)))
-         (width (frame-width frame))
+         (window (or window (selected-window)))
+         (width (window-width window))
          (left (string-join (taoline--collect-segments :left buffer) " "))
          (right (string-join (taoline--collect-segments :right buffer) " "))
          (mid-space (max 1 (- width (string-width left) (string-width right)))))
-    (concat
-     (propertize left 'face 'taoline-base-face)
-     (make-string mid-space ?\s)
-     (propertize right 'face 'taoline-base-face))))
+    (truncate-string-to-width
+     (concat
+      (propertize left 'face 'taoline-base-face)
+      (make-string mid-space ?\s)
+      (propertize right 'face 'taoline-base-face))
+     width)))
 
 ;; ----------------------------------------------------------------------------
 ;; Built-in segments
@@ -219,32 +280,42 @@ Registers the NAME in the segment table."
 (defvar-local taoline--modeline-expression nil)
 
 (defun taoline--modeline-setup ()
-  "Setup for `modeline' backend.
+  "Setup for `modeline' backend для всех окон.
 Прячет обычный `mode-line-format' (сохранив в
 `taoline--saved-mode-line-format') и устанавливает собственную
-Taoline-строку."
-  (taoline--hide-default-mode-line)
-  "Setup taoline as the current window's modeline."
-  (unless taoline--modeline-old
-    (setq taoline--modeline-old (default-value 'mode-line-format)))
-  (setq taoline--modeline-expression
-        '(:eval (taoline-compose-modeline)))
-  (setq mode-line-format taoline--modeline-expression))
+Taoline-строку в каждом окне."
+  (walk-windows
+   (lambda (win)
+     (with-selected-window win
+       (let ((expr '(:eval (taoline-compose-modeline nil (selected-window)))))
+         (set-window-parameter win 'taoline--modeline-old (window-parameter win 'mode-line-format))
+         (set-window-parameter win 'taoline--modeline-expression expr)
+         (set-window-parameter win 'mode-line-format expr)
+         (set-window-parameter win 'mode-line-format expr)
+         (set-window-parameter win 'mode-line-format expr)
+         (set-window-parameter win 'mode-line-format expr)
+         (setq mode-line-format expr)))))
+   nil t)
 
 (defun taoline--modeline-update (_str)
-  "Force update of the modeline."
-  (force-mode-line-update t))
+  "Force update of the modeline в каждом окне."
+  (walk-windows
+   (lambda (win)
+     (with-selected-window win
+       (force-mode-line-update t)))
+   nil t))
 
 (defun taoline--modeline-teardown ()
-  "Teardown for `modeline' backend.
-Убирает Taoline из `mode-line-format' и восстанавливает сохранённый
-пользовательский mode-line."
-  (taoline--restore-default-mode-line)
-  "Restore previous mode-line-format."
-  (when taoline--modeline-old
-    (setq mode-line-format taoline--modeline-old)
-    (setq taoline--modeline-old nil)
-    (setq taoline--modeline-expression nil)))
+  "Teardown for `modeline' backend во всех окнах."
+  (walk-windows
+   (lambda (win)
+     (with-selected-window win
+       (let ((old (window-parameter win 'taoline--modeline-old)))
+         (when old
+           (set-window-parameter win 'mode-line-format old)
+           (set-window-parameter win 'taoline--modeline-old nil)
+           (set-window-parameter win 'taoline--modeline-expression nil)))))
+   nil t))
 
 ;; -- Echo area backend
 
@@ -375,25 +446,44 @@ No debug/trace output goes to the minibuffer or *Messages*; debug stays in *taol
 (defvar-local taoline--header-expression nil)
 
 (defun taoline--header-setup ()
-  (unless taoline--header-old
-    (setq taoline--header-old (default-value 'header-line-format)))
-  (setq taoline--header-expression
-        '(:eval (taoline-compose-modeline)))
-  (setq header-line-format taoline--header-expression))
+  "Setup Taoline header-line во всех окнах."
+  (walk-windows
+   (lambda (win)
+     (with-selected-window win
+       (let ((expr '(:eval (taoline-compose-modeline nil (selected-window)))))
+         (set-window-parameter win 'taoline--header-old (window-parameter win 'header-line-format))
+         (set-window-parameter win 'taoline--header-expression expr)
+         (set-window-parameter win 'header-line-format expr)
+         (setq header-line-format expr))))
+   nil t))
 
 (defun taoline--header-update (_str)
-  (force-mode-line-update t))
+  (walk-windows
+   (lambda (win)
+     (with-selected-window win
+       (force-mode-line-update t)))
+   nil t))
 
 (defun taoline--header-teardown ()
-  (when taoline--header-old
-    (setq header-line-format taoline--header-old)
-    (setq taoline--header-old nil)
-    (setq taoline--header-expression nil)))
+  "Teardown header-line во всех окнах."
+  (walk-windows
+   (lambda (win)
+     (with-selected-window win
+       (let ((old (window-parameter win 'taoline--header-old)))
+         (when old
+           (set-window-parameter win 'header-line-format old)
+           (set-window-parameter win 'taoline--header-old nil)
+           (set-window-parameter win 'taoline--header-expression nil)))))
+   nil t))
 
 ;; -- Posframe backend
 
 (defvar taoline--posframe-buffer " *taoline-posframe*")
 (defvar taoline--posframe-name "taoline-posframe")
+
+(defface taoline-posframe-face
+  '((t :inherit default :family "monospace" :height 1.0))
+  "Face for taoline posframe panel (forced monospace).")
 
 (defun taoline--posframe-setup ()
   (require 'posframe)
@@ -401,22 +491,30 @@ No debug/trace output goes to the minibuffer or *Messages*; debug stays in *taol
 
 (defun taoline--posframe-update (str)
   (require 'posframe)
+  ;; Обеспечиваем что строка имеет наш шрифт
   (let* ((width (frame-width))
          (height 1)
-         (params '((left-fringe . 8) (right-fringe . 8))))
+         (mono-str (propertize str 'face 'taoline-posframe-face)))
     (posframe-show
      taoline--posframe-buffer
-     :string str
+     :string mono-str
      :name taoline--posframe-name
-     :poshandler 'posframe-poshandler-frame-bottom-center
+     :poshandler 'posframe-poshandler-frame-bottom-left-corner
      :min-width width
+     :max-width width
      :min-height height
      :border-width 0
-     :override-parameters params)))
+     ;; Важно: font для child-frame explicit
+     :override-parameters
+     '((font . "monospace") (left-fringe . 0) (right-fringe . 0)
+       (vertical-scroll-bars . nil)))))
 
 (defun taoline--posframe-teardown ()
   (ignore-errors
     (require 'posframe)
+    ;; Сначала попробуем скрыть, затем удалить, на всех версиях posframe.
+    (when (fboundp 'posframe-hide)
+      (posframe-hide taoline--posframe-buffer))
     (posframe-delete taoline--posframe-buffer)))
 
 ;; ----------------------------------------------------------------------------
