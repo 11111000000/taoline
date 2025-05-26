@@ -19,7 +19,7 @@
 ;; Features:
 ;; - Minimalist, highly customizable segments.
 ;; - Functional style: pure segment functions, stateless composition.
-;; - Multiple backends: echo area, header-line, and posframe.
+;; - Multiple backends: echo area and posframe.
 ;; - Easy extension via macros for new segments.
 ;; - No periodic timers; only updates on user commands (post-command-hook, etc).
 ;; - Unit-testable core compose logic.
@@ -40,6 +40,18 @@
   "Functional minimalist mode-line replacement."
   :group 'convenience
   :prefix "taoline-")
+
+;; ----------------------------------------------------------------
+;; Debug logging helpers
+(defcustom taoline-debug-log t
+  "If non-nil, taoline emits verbose debug messages to *Messages*."
+  :type 'boolean
+  :group 'taoline)
+
+(defun taoline--log (fmt &rest args)
+  "Log a formatted debug message when `taoline-debug-log' is non-nil."
+  (when taoline-debug-log
+    (apply #'message (concat "[taoline] " fmt) args)))
 
 ;; -- Posframe backend
 ;;
@@ -63,21 +75,43 @@
 
 (defun taoline--hide-all-modelines ()
   "Hide mode-lines in every window on every frame, remembering originals."
-  (walk-windows
-   (lambda (win)
-     (with-selected-window win
-       ;; Save only once per window
-       (unless (window-parameter win taoline--saved-modeline-param)
-         (set-window-parameter
-          win taoline--saved-modeline-param
-          (window-parameter win 'mode-line-format)))
-       ;; Hide the mode-line in this window
-       (set-window-parameter win 'mode-line-format nil)
-       (setq mode-line-format nil)))
-   nil t))                               ; t ⇒ include all frames
+  (taoline--log ">> hide-all-modelines")
+  (when (and taoline-autohide-modeline
+             (memq taoline--active-backend '(echo posframe)))
+    (walk-windows
+     (lambda (win)
+       (with-selected-window win
+         ;; Save only once per window
+         (unless (window-parameter win taoline--saved-modeline-param)
+           (set-window-parameter
+            win taoline--saved-modeline-param
+            (window-parameter win 'mode-line-format)))
+         ;; Hide the mode-line in this window
+         (set-window-parameter win 'mode-line-format nil)
+         (setq mode-line-format nil)))
+     nil t)))                            ; t ⇒ include all frames
+
+(defun taoline--maybe-hide-new-window-modeline (&rest _)
+  "Auto-hide modeline for all windows after window/buffer changes, if autohide is enabled.
+This guarantees that modeline remains hidden for all windows, including new ones, when taoline is active with autohide.
+Intended for use in hooks."
+  (when (and taoline-autohide-modeline
+             (memq taoline--active-backend '(echo posframe)))
+    ;; Hide for all windows, including new ones
+    (walk-windows
+     (lambda (win)
+       (with-selected-window win
+         (unless (window-parameter win taoline--saved-modeline-param)
+           (set-window-parameter
+            win taoline--saved-modeline-param
+            (window-parameter win 'mode-line-format))
+           (set-window-parameter win 'mode-line-format nil)
+           (setq mode-line-format nil))))
+     nil t)))
 
 (defun taoline--restore-all-modelines ()
   "Restore previously hidden mode-lines in all windows."
+  (taoline--log ">> restore-all-modelines")
   (walk-windows
    (lambda (win)
      (with-selected-window win
@@ -90,17 +124,61 @@
    nil t))
 
 (with-eval-after-load 'taoline
-  ;; Hide on posframe backend activation
-  (advice-add 'taoline--posframe-setup    :after #'taoline--hide-all-modelines)
+  ;; ------------------------------------------------------------
+  ;; Сохраняем оригинальные mode-line’ы для windows ещё до того,
+  ;; как бек-энд modeline их перезапишет.
+  (defun taoline--save-all-modelines (&rest _)
+    "Сохранить текущий `mode-line-format` каждого окна,
+если он ещё не был сохранён."
+    (taoline--log ">> save-all-modelines")
+    (walk-windows
+     (lambda (win)
+       (unless (window-parameter win taoline--saved-modeline-param)
+         (set-window-parameter
+          win taoline--saved-modeline-param
+          (window-parameter win 'mode-line-format))))
+     nil t))
+
+  ;; ------------------------------------------------------------
+  ;; Hide on backend activation (both posframe and echo)
+  (advice-add 'taoline--posframe-setup :after #'taoline--hide-all-modelines)
+  (advice-add 'taoline--echo-setup   :after #'taoline--hide-all-modelines)
+
+  ;; Для in-window бек-энда: сперва сохраняем исходное состояние.
+  (advice-add 'taoline--modeline-setup :before #'taoline--save-all-modelines)
+
+  ;; ------------------------------------------------------------
   ;; Restore on backend deactivation
-  (advice-add 'taoline--posframe-teardown :before #'taoline--restore-all-modelines))
+  (advice-add 'taoline--posframe-teardown :before #'taoline--restore-all-modelines)
+  (advice-add 'taoline--echo-teardown     :before #'taoline--restore-all-modelines)
+  (advice-add 'taoline--modeline-teardown :before #'taoline--restore-all-modelines))
+
+;; --- Automatically hide modeline in any new window/buffer while taoline is on and autohide is enabled
+(defvar taoline--window-config-hide-hooked nil
+  "Whether taoline is currently hiding modelines for new windows.")
+
+(defun taoline--enable-hide-modeline-hooks ()
+  "Enable hooks that keep hiding modelines in new windows when taoline is active."
+  (unless taoline--window-config-hide-hooked
+    (add-hook 'window-configuration-change-hook #'taoline--maybe-hide-new-window-modeline)
+    (add-hook 'buffer-list-update-hook #'taoline--maybe-hide-new-window-modeline)
+    (setq taoline--window-config-hide-hooked t)))
+
+(defun taoline--disable-hide-modeline-hooks ()
+  "Remove hooks set by `taoline--enable-hide-modeline-hooks'."
+  (when taoline--window-config-hide-hooked
+    (remove-hook 'window-configuration-change-hook #'taoline--maybe-hide-new-window-modeline)
+    (remove-hook 'buffer-list-update-hook #'taoline--maybe-hide-new-window-modeline)
+    (setq taoline--window-config-hide-hooked nil)))
 
 
 (defvar taoline--posframe-table (make-hash-table :test 'eq)
   "Таблица posframe'ов по окнам.")
 
 (defun taoline--posframe-setup ()
-  "Показать posframe taoline во всех окнах."
+  "Показать posframe taoline во всех окнах. Скрыть modeline если нужно."
+  (when taoline-autohide-modeline
+    (taoline--hide-all-modelines))
   (walk-windows
    (lambda (win)
      (taoline--posframe-show win))
@@ -114,17 +192,28 @@
    nil t))
 
 (defun taoline--posframe-teardown ()
-  "Убрать posframe taoline во всех окнах."
+  "Убрать posframe taoline во всех окнах. Восстановить modeline если нужно."
+  ;; 1. Удаляем все posframe, которые были созданы в taoline--posframe-table
   (maphash (lambda (_win pfname)
              (ignore-errors (posframe-delete pfname)))
            taoline--posframe-table)
-  (clrhash taoline--posframe-table))
+  (clrhash taoline--posframe-table)
+  ;; 2. Также дополнительно удаляем все posframe, которые соответствуют шаблону " taoline-posframe-*" (на случай несинхронизации хеша)
+  (when (boundp 'posframe--frame-list)
+    (dolist (entry posframe--frame-list)
+      (let ((name (car entry)))
+        (when (and (stringp (symbol-name name))
+                   (string-prefix-p " taoline-posframe-" (symbol-name name)))
+          (ignore-errors (posframe-delete name))))))
+  ;; 3. Гарантированно восстанавливаем modeline даже если autohide отключён уже после инициализации
+  (taoline--restore-all-modelines))
 
 (defun taoline--posframe-show (win)
   "Показать/обновить posframe в окне WIN."
   (let* ((buffer (window-buffer win))
-         (width (window-width win))
-         (str (taoline-compose-modeline buffer win))
+         ;; Явно всегда используем frame-width!
+         (fwidth (frame-width (window-frame win)))
+         (str (taoline-compose-modeline buffer win fwidth))
          (pfname (intern (format " taoline-posframe-%s" (window-parameter win 'window-id)))))
     (puthash win pfname taoline--posframe-table)
     (posframe-show
@@ -132,30 +221,26 @@
      :string str
      :position (window-point win)
      :parent-window win
-     :width width
+     :width fwidth
      :border-width 0
      :background-color (face-attribute 'mode-line :background nil t))))
 
 ;; ------------------------------------------------------
 
-;; Override backend switching logic to always teardown previous backend fully
-(defun taoline--activate-backend (backend)
-  "Activate BACKEND, ensuring all teardown for previous one (including posframe)."
-  (taoline--switch-backend backend))----------------------
+
 ;; Customizable variables
 
 (defcustom taoline-display-backend 'modeline
   "Backend to show the modeline.
-Supported values: 'modeline, 'echo, 'header, 'posframe"
+Supported values: 'modeline, 'echo, 'posframe"
   :type '(choice (const :tag "In-window modeline" modeline)
                  (const :tag "Echo area" echo)
-                 (const :tag "Header line" header)
                  (const :tag "Child frame (posframe)" posframe))
   :group 'taoline)
 
 (defcustom taoline-segments
   '((:left taoline-segment-git-branch taoline-segment-buffer-name)
-    (:right taoline-segment-major-mode taoline-segment-time))
+    (:right taoline-segment-battery taoline-segment-major-mode taoline-segment-time))
   "List of segments to display in the modeline.
 :LEFT and :RIGHT are lists of segment *function symbols*."
   :type '(alist :key-type symbol :value-type (repeat function))
@@ -165,6 +250,14 @@ Supported values: 'modeline, 'echo, 'header, 'posframe"
   '(post-command-hook find-file-hook after-save-hook)
   "A list of hooks triggering taoline update."
   :type '(repeat symbol)
+  :group 'taoline)
+
+(defcustom taoline-autohide-modeline t
+  "If non-nil, auto-hide the usual modeline in all windows when taoline is active in 'posframe or 'echo backends.
+When enabled and taoline is using the echo area or posframe backend, all modelines are hidden in every window.
+When taoline is switched back to the in-window backend, original modelines are restored.
+This variable does not currently affect the 'modeline backend (in-window modeline)."
+  :type 'boolean
   :group 'taoline)
 
 ;; ----------------------------------------------------------------------------
@@ -217,6 +310,7 @@ Supported values: 'modeline, 'echo, 'header, 'posframe"
 
 (defun taoline--switch-backend (new-backend)
   "Switch to NEW-BACKEND. Teardown previous, setup new."
+  (taoline--log ">> switch-backend %s -> %s" taoline--active-backend new-backend)
   (when taoline--active-backend
     (let* ((teardown (cdr (assq 'teardown (cdr (assq taoline--active-backend taoline--backend-table))))))
       (when teardown (funcall teardown))))
@@ -224,7 +318,16 @@ Supported values: 'modeline, 'echo, 'header, 'posframe"
   (let* ((setup (cdr (assq 'setup (cdr (assq taoline--active-backend taoline--backend-table)))))
          (update (cdr (assq 'update (cdr (assq taoline--active-backend taoline--backend-table))))))
     (when setup (funcall setup))
-    (setq taoline--backend-data (cons setup update))))
+    (setq taoline--backend-data (cons setup update)))
+  ;; Восстанавливаем modeline и убираем autohide-хуки всегда при уходе с posframe/echo на modeline
+  (if (memq new-backend '(echo posframe))
+      (when taoline-autohide-modeline
+        (taoline--enable-hide-modeline-hooks))
+    ;; После любого выключения posframe/echo – modeline должны быть восстановлены
+    (unless new-backend  ; При полном выключении (new-backend nil)
+      (taoline--modeline-teardown))
+    (taoline--restore-all-modelines)
+    (taoline--disable-hide-modeline-hooks)))
 
 ;; ----------------------------------------------------------------------------
 ;; Segment definition and segment API
@@ -238,9 +341,10 @@ Registers the NAME in the segment table."
      (puthash ',name #',name taoline--segment-table)))
 
 (defun taoline--apply-segment (fn buffer)
-  "Call segment FN with BUFFER."
+  "Call segment FN with BUFFER. Always return a string (empty if nil, or error)."
   (condition-case err
-      (funcall fn buffer)
+      (let ((res (funcall fn buffer)))
+        (if (stringp res) res (or (and res (format "%s" res)) "")))
     (error (propertize (format "[SEGMENT ERROR: %s]" err) 'face 'error))))
 
 (defun taoline--collect-segments (side buffer)
@@ -252,12 +356,22 @@ Registers the NAME in the segment table."
 ;; ----------------------------------------------------------------------------
 ;; Core: Compose functionally the modeline string
 
-(defun taoline-compose-modeline (&optional buffer window)
+(defun taoline-compose-modeline (&optional buffer window width)
   "Pure function: compose modeline string for BUFFER and WINDOW.
-Если WINDOW не задан — используется выбранное окно."
+WIDTH если задан, используется для ограничения ширины.
+Если WINDOW не задан — используется выбранное окно.
+
+Для backend’ов posframe и echo по умолчанию используется ширина frame, иначе window."
   (let* ((buffer (or buffer (current-buffer)))
          (window (or window (selected-window)))
-         (width (window-width window))
+         ;; Определяем ширину: если echo или posframe — frame-width
+         (width (or width
+                    (cond
+                     ((eq taoline--active-backend 'posframe)
+                      (frame-width (window-frame window)))
+                     ((eq taoline--active-backend 'echo)
+                      (frame-width (window-frame window)))
+                     (t (window-width window)))))
          (left (string-join (taoline--collect-segments :left buffer) " "))
          (right (string-join (taoline--collect-segments :right buffer) " "))
          (mid-space (max 1 (- width (string-width left) (string-width right)))))
@@ -278,8 +392,7 @@ Registers the NAME in the segment table."
 
 (taoline-define-segment taoline-segment-buffer-name (buffer)
   "Display current buffer name, with * if modified."
-  (let* ((name (buffer-name buffer))
-         (mod (if (buffer-modified-p buffer) "*" "")))
+  (let ((name (buffer-name buffer)))
     (concat
      (propertize name 'face 'taoline-buffer-face)
      (when (buffer-modified-p buffer)
@@ -307,6 +420,25 @@ Registers the NAME in the segment table."
         (propertize (concat " " branch) 'face 'taoline-git-face)
       "")))
 
+(taoline-define-segment taoline-segment-battery (buffer)
+  "Display battery icon and percentage."
+  (if (functionp battery-status-function)
+      (let* ((data (ignore-errors (funcall battery-status-function)))
+             (percent-str (or (cdr (assoc "percentage" data))
+                              (cdr (assoc 112 data))
+                              (cdr (assoc ?p data)))))
+        (if (and percent-str (string-match-p "^[0-9]+$" percent-str))
+            (let* ((percent (string-to-number percent-str))
+                   (icon (cond
+                          ((>= percent 95) (all-the-icons-faicon "battery-full" :height 0.95 :v-adjust -0.05))
+                          ((>= percent 70) (all-the-icons-faicon "battery-three-quarters" :height 0.95 :v-adjust -0.05))
+                          ((>= percent 45) (all-the-icons-faicon "battery-half" :height 0.95 :v-adjust -0.05))
+                          ((>= percent 20) (all-the-icons-faicon "battery-quarter" :height 0.95 :v-adjust -0.05))
+                          (t (all-the-icons-faicon "battery-empty" :height 0.95 :v-adjust -0.05)))))
+              (format "%s %s%%" icon percent))
+          ""))
+    ""))
+
 ;; ----------------------------------------------------------------------------
 ;; Backend registry
 
@@ -317,13 +449,33 @@ Registers the NAME in the segment table."
     (echo    . ((setup . taoline--echo-setup)
                 (update . taoline--echo-update)
                 (teardown . taoline--echo-teardown)))
-    (header  . ((setup . taoline--header-setup)
-                (update . taoline--header-update)
-                (teardown . taoline--header-teardown)))
+
     (posframe . ((setup . taoline--posframe-setup)
                  (update . taoline--posframe-update)
                  (teardown . taoline--posframe-teardown))))
   "Backend function registry.")
+
+;; -- Echo backend (minibuffer)
+
+(defun taoline--echo-update (_str)
+  "Обновить таолайн в эхо-области (minibuffer)."
+  ;; Echo area всегда шириной frame-width
+  (let* ((fwidth (frame-width (selected-frame)))
+         (str (taoline-compose-modeline (current-buffer) (selected-window) fwidth)))
+    (message "%s" str)))
+
+(defun taoline--echo-setup ()
+  "Echo backend: Скрыть modeline если нужно."
+  (when taoline-autohide-modeline
+    (taoline--hide-all-modelines))
+  nil)
+
+(defun taoline--echo-teardown ()
+  "Очистить эхо и восстановить modeline если нужно."
+  (when taoline-autohide-modeline
+    (taoline--restore-all-modelines))
+  (message ""))
+
 
 ;; -- Modeline backend (in-window modeline)
 
@@ -331,54 +483,93 @@ Registers the NAME in the segment table."
 (defvar-local taoline--modeline-expression nil)
 
 (defun taoline--modeline-setup ()
-  "Setup taoline modeline во всех окнах."
-  ;; Подключить хук изменения размера окон (общий для modeline и headerline)
+  "Setup taoline modeline so that only the selected window shows taoline."
+  (taoline--log ">> modeline-setup (selected-window %s)" (selected-window))
+  ;; Хук для ресайза оставляем, но он теперь просто обновляет выбранное окно (перерисовка)
   (unless (bound-and-true-p taoline--size-change-hook-installed)
     (add-hook 'window-size-change-functions #'taoline--window-size-change-handler)
     (setq taoline--size-change-hook-installed t))
-  (walk-windows
-   (lambda (win)
-     (with-selected-window win
-       (let ((expr '(:eval (taoline-compose-modeline nil (selected-window)))))
-         ;; Сохраняем дефолтный mode-line-format только 1 раз (при первом включении в этом окне)
-         (unless (window-parameter win 'taoline--modeline-old)
-           (set-window-parameter win 'taoline--modeline-old (window-parameter win 'mode-line-format)))
-         (set-window-parameter win 'taoline--modeline-expression expr)
-         (set-window-parameter win 'mode-line-format expr)
-         (setq mode-line-format expr)))))
-   nil t)
+  ;; При активации сохраняем modeline только для selected-window
+  (let ((win (selected-window))
+        (expr '(:eval (taoline-compose-modeline nil (selected-window)))))
+    ;; Сохранять только оригинальный (не уже подменённый taoline) mode-line
+    (unless (window-parameter win 'taoline--modeline-old)
+      ;; Только если в параметре всё ещё nil, сохраняем текущее (оригинальное) значение.
+      (set-window-parameter win 'taoline--modeline-old (window-parameter win 'mode-line-format)))
+    (set-window-parameter win 'taoline--modeline-expression expr)
+    (set-window-parameter win 'mode-line-format expr)
+    (setq mode-line-format expr)
+    (force-mode-line-update t))
+  ;; Ставим хук на переключение окон — чтобы taoline показывался только в активном
+  (unless (bound-and-true-p taoline--window-selection-change-hook-installed)
+    (add-hook 'window-selection-change-functions #'taoline--modeline-window-selection-change)
+    (setq taoline--window-selection-change-hook-installed t)))
 
-;; Централизованный обработчик для любого изменения размера окна (и modeline, и headerline)
+;; Централизованный обработчик для любого изменения размера окна для modeline
 (defun taoline--window-size-change-handler (&rest _)
-  "Перерисовать все taoline (modeline/headerline) при изменении любого окна."
-  (when (memq taoline--active-backend '(modeline header))
-    (walk-windows
-     (lambda (win)
-       (with-selected-window win
-         (force-mode-line-update t)))
-     nil t)))
+  "Перерисовать taoline в текущем окне при изменении размера окна."
+  (when (eq taoline--active-backend 'modeline)
+    (with-selected-window (selected-window)
+      (force-mode-line-update t))))
 
 (defun taoline--modeline-update (_str)
-  "Force update of the modeline в каждом окне."
-  (walk-windows
-   (lambda (win)
-     (with-selected-window win
-       (force-mode-line-update t)))
-   nil t))
+  "Update taoline modeline only in selected window; restore defaults (or hide) in others.
+Если `taoline-autohide-modeline`, то скрывает modeline во всех окнах, кроме активного."
+  (taoline--log ">> modeline-update")
+  (let* ((win (selected-window))
+         (expr '(:eval (taoline-compose-modeline nil (selected-window)))))
+    (dolist (other (window-list))
+      (if (eq other win)
+          (with-selected-window other
+            (unless (window-parameter other 'taoline--modeline-old)
+              (set-window-parameter other 'taoline--modeline-old (window-parameter other 'mode-line-format)))
+            (set-window-parameter other 'mode-line-format expr)
+            (setq mode-line-format expr)
+            (force-mode-line-update t))
+        ;; невыбранное окно:
+        (if (bound-and-true-p taoline-autohide-modeline)
+            (progn
+              (unless (window-parameter other 'taoline--modeline-old)
+                (set-window-parameter other 'taoline--modeline-old (window-parameter other 'mode-line-format)))
+              (set-window-parameter other 'mode-line-format nil)
+              (with-selected-window other
+                (setq mode-line-format nil)
+                (force-mode-line-update t)))
+          ;; вернуть оригинальный modeline если был
+          (let ((old (window-parameter other 'taoline--modeline-old)))
+            (when old
+              (set-window-parameter other 'mode-line-format old)
+              (set-window-parameter other 'taoline--modeline-old nil)
+              (set-window-parameter other 'taoline--modeline-expression nil)
+              (setq mode-line-format old)
+              (force-mode-line-update t))))))))
 
 (defun taoline--modeline-teardown ()
-  "Teardown для modeline: восстановить дефолтный mode-line-format во всех окнах."
-  (walk-windows
-   (lambda (win)
-     (with-selected-window win
-       (let ((old (window-parameter win 'taoline--modeline-old)))
-         (when old
-           (set-window-parameter win 'mode-line-format old)
-           (set-window-parameter win 'taoline--modeline-old nil)
-           (set-window-parameter win 'taoline--modeline-expression nil)
-           (setq mode-line-format old)
-           (force-mode-line-update t))))) ; восстановить mode-line-format в буфере
-   nil t))
+  "Restore all modelines in all windows (including hidden)."
+  (taoline--log ">> modeline-teardown")
+  (remove-hook 'post-command-hook #'taoline--modeline-window-selection-change)
+  (remove-hook 'window-configuration-change-hook #'taoline--modeline-window-configuration-change)
+  (remove-hook 'window-size-change-functions #'taoline--window-size-change-handler)
+  (dolist (win (window-list (selected-frame) t))
+    (let ((old (or (window-parameter win 'taoline--modeline-old)
+                   (default-value 'mode-line-format))))
+      (set-window-parameter win 'mode-line-format old)
+      (with-selected-window win
+        (setq mode-line-format old)
+        (force-mode-line-update))
+      (set-window-parameter win 'taoline--modeline-old nil)
+      (set-window-parameter win 'taoline--modeline-active nil)
+      (set-window-parameter win 'taoline--modeline-expression nil)))
+  (setq taoline--windows-with-taoline nil)
+  (setq taoline--last-selected-window nil))
+
+
+;; Window selection change: обновлять taoline на лету
+
+(defun taoline--modeline-window-selection-change (_frame)
+  "Хук на переключение выбранного окна — обновить taoline только в выбранном окне."
+  (when (eq taoline--active-backend 'modeline)
+    (taoline--modeline-update nil)))  ;; Просто пересоздать modeline/restore везде
 
 ;; -- Echo area backend
 
@@ -503,50 +694,6 @@ No debug/trace output goes to the minibuffer or *Messages*; debug stays in *taol
               (string-match-p "\\`[ \t\n\r]*\\'" msg))
       (message ""))))
 
-;; -- Header line backend
-
-(defvar-local taoline--header-old nil)
-(defvar-local taoline--header-expression nil)
-
-(defun taoline--header-setup ()
-  "Setup taoline header-line во всех окнах."
-  ;; Подключить хук изменения размера окон (общий уже добавлен в modeline-setup, но если header первый – добавить)
-  (unless (bound-and-true-p taoline--size-change-hook-installed)
-    (add-hook 'window-size-change-functions #'taoline--window-size-change-handler)
-    (setq taoline--size-change-hook-installed t))
-  (walk-windows
-   (lambda (win)
-     (with-selected-window win
-       (let ((expr '(:eval (taoline-compose-modeline nil (selected-window)))))
-         ;; Сохраняем дефолтный header-line-format только 1 раз
-         (unless (window-parameter win 'taoline--header-old)
-           (set-window-parameter win 'taoline--header-old (window-parameter win 'header-line-format)))
-         (set-window-parameter win 'taoline--header-expression expr)
-         (set-window-parameter win 'header-line-format expr)
-         (setq header-line-format expr))))
-   nil t))
-
-(defun taoline--header-update (_str)
-  (walk-windows
-   (lambda (win)
-     (with-selected-window win
-       (force-mode-line-update t)))
-   nil t))
-
-(defun taoline--header-teardown ()
-  "Teardown header-line: восстановить дефолтный header-line-format во всех окнах."
-  (walk-windows
-   (lambda (win)
-     (with-selected-window win
-       (let ((old (window-parameter win 'taoline--header-old)))
-         (when old
-           (set-window-parameter win 'header-line-format old)
-           (set-window-parameter win 'taoline--header-old nil)
-           (set-window-parameter win 'taoline--header-expression nil)
-           (setq header-line-format old)
-           (force-mode-line-update t))))) ; восстановить header-line-format в буфере
-   nil t))
-
 ;; -- Posframe backend
 
 (defvar taoline--posframe-buffer " *taoline-posframe*")
@@ -610,7 +757,7 @@ No debug/trace output goes to the minibuffer or *Messages*; debug stays in *taol
     (when b (funcall (alist-get 'teardown b)))))
 
 (defun taoline--set-backend (backend)
-  "Switch to BACKEND, handling setup/teardown, правильное восстановление обычного modeline/headerline, и общий window-size-change-хук."
+  "Switch to BACKEND, handling setup/teardown, правильное восстановление обычного modeline, и общий window-size-change-хук."
   (taoline--log "[taoline debug] set-backend called: %S" backend)
   (setq taoline-display-backend backend)
   (unless (eq backend taoline--active-backend)
@@ -621,7 +768,7 @@ No debug/trace output goes to the minibuffer or *Messages*; debug stays in *taol
     (setq taoline--active-backend backend)
     (setq taoline--last-str ""))
   ;; Если taoline выключен и не остался ни один оконный backend — убрать size-change-хук
-  (unless (memq backend '(modeline header))
+  (unless (memq backend '(modeline))
     (when (bound-and-true-p taoline--size-change-hook-installed)
       (remove-hook 'window-size-change-functions #'taoline--window-size-change-handler)
       (setq taoline--size-change-hook-installed nil))))
@@ -665,7 +812,7 @@ In echo mode: ALWAYS refresh into echo area if it is empty or whitespace (even i
 
 (defun taoline--window-size-change-handler (_frame)
   "Force taoline update on any window size change in current frame."
-  (when (memq taoline-display-backend '(modeline headerline))
+  (when (memq taoline-display-backend '(modeline))
     (walk-windows
      (lambda (win)
        (with-selected-window win
@@ -678,7 +825,7 @@ In echo mode: ALWAYS refresh into echo area if it is empty or whitespace (even i
   (when (eq taoline-display-backend 'echo)
     (add-hook 'post-command-hook #'taoline--echo-refresh-if-empty))
   ;; Add window-size-change hook only for relevant backends
-  (when (memq taoline-display-backend '(modeline headerline))
+  (when (memq taoline-display-backend '(modeline))
     (add-hook 'window-size-change-functions #'taoline--window-size-change-handler))
   (taoline--log "[taoline debug] hooks enabled, backend=%s hooks=%S"
            taoline-display-backend taoline-update-hooks))
@@ -691,36 +838,6 @@ In echo mode: ALWAYS refresh into echo area if it is empty or whitespace (even i
   ;; Remove window-size-change hook for taoline display
   (remove-hook 'window-size-change-functions #'taoline--window-size-change-handler)
   (taoline--log "[taoline debug] hooks removed, backend=%s" taoline-display-backend))
-
-;; ----------------------------------------------------------------------------
-;; Mode-line hiding / restoration helpers
-
-(defvar taoline--saved-mode-line-format nil
-  "Backup of the original `mode-line-format` before `taoline-mode` hides it.")
-
-(defun taoline--hide-default-mode-line ()
-  "Hide the regular mode-line, saving its original value.
-The original value is stored in `taoline--saved-mode-line-format' and
-applied to all existing buffers as well as the default for future ones."
-  (unless taoline--saved-mode-line-format
-    (setq taoline--saved-mode-line-format (default-value 'mode-line-format))
-    ;; Hide for future buffers
-    (setq-default mode-line-format nil)
-    ;; Hide for every currently live buffer
-    (dolist (buf (buffer-list))
-      (with-current-buffer buf
-        (setq mode-line-format nil)))))
-
-(defun taoline--restore-default-mode-line ()
-  "Restore the regular mode-line that was saved by `taoline--hide-default-mode-line'."
-  (when taoline--saved-mode-line-format
-    ;; Restore for future buffers
-    (setq-default mode-line-format taoline--saved-mode-line-format)
-    ;; Restore for every existing buffer
-    (dolist (buf (buffer-list))
-      (with-current-buffer buf
-        (setq mode-line-format taoline--saved-mode-line-format)))
-    (setq taoline--saved-mode-line-format nil)))
 
 ;; ----------------------------------------------------------------------------
 ;; minor mode
@@ -743,11 +860,14 @@ applied to all existing buffers as well as the default for future ones."
         (taoline--add-hooks)
         (taoline--maybe-update))
     (taoline--remove-hooks)
-    (when taoline--active-backend
-      (taoline--backend-teardown taoline--active-backend)
-      (setq taoline--active-backend nil))
-    ;; Restore the original mode-line for the user
-    (taoline--restore-default-mode-line)))
+    ;; Сначала восстановим всем окнам их исходный mode-line (важно для backend=modeline)
+    (taoline-reset-all-lines)
+    ;; После восстановления вызываем teardown только для тех backend’ов,
+    ;; которым это действительно нужно (modeline уже приведён в порядок).
+    (when (and taoline--active-backend
+               (not (eq taoline--active-backend 'modeline)))
+      (taoline--backend-teardown taoline--active-backend))
+    (setq taoline--active-backend nil)))
 
 ;;;###autoload
 (defun taoline-set-backend (bk)
@@ -782,7 +902,7 @@ is enabled."
 
 ;;;###autoload
 (defun taoline-reset-all-lines ()
-  "Forcefully restore all mode-line and header-line formats in every window to
+  "Forcefully restore all mode-line format in every window to
 their original (pre-Taoline) values.
 
 Useful when Taoline visuals get corrupted or you simply want to return to the
@@ -803,18 +923,12 @@ is changed there."
            (set-window-parameter win 'mode-line-format saved)
            (set-window-parameter win 'taoline--modeline-old nil)
            (setq mode-line-format saved)))
-       ;; ---------- header-line ----------
-       (let ((saved-header (window-parameter win 'taoline--header-old)))
-         (when saved-header
-           (set-window-parameter win 'header-line-format saved-header)
-           (set-window-parameter win 'taoline--header-old nil)
-           (setq header-line-format saved-header)))
        ;; Immediately redraw the window after restoring
        (force-mode-line-update t)))
    nil t)
   ;; Forget backend so Taoline doesn't try to update again until re-enabled
   (setq taoline--active-backend nil)
-  (message "Taoline: mode-line and header-line were reset to defaults."))
+  (message "Taoline: mode-line were reset to defaults."))
 
 (provide 'taoline)
 
