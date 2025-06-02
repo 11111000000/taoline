@@ -29,7 +29,6 @@
 ;;; Code:
 
 (require 'cl-lib)
-(require 'subr-x)
 (eval-when-compile (require 'rx))
 (require 'projectile nil t)
 (require 'all-the-icons nil t)
@@ -73,23 +72,27 @@ Never writes debug to *Messages*."
   "Set `mode-line-format' to VALUE globally: in all buffers and windows.
 If BACKUP-RESTORE is non-nil, backup or restore `default-mode-line-format'."
   (when backup-restore
-    (if value
-        (when taoline--default-mode-line-format-backup
+    (if (eq value :default) ; This implies 'restore'
+        (when taoline--default-mode-line-format-backup ; Only restore if we have a backup
           (setq-default mode-line-format taoline--default-mode-line-format-backup)
-          (setq taoline--default-mode-line-format-backup nil))
-      (unless taoline--default-mode-line-format-backup
+          (setq taoline--default-mode-line-format-backup nil)) ; Clear backup after restoring
+      (unless taoline--default-mode-line-format-backup ; This implies 'backup' (when value is nil)
         (setq taoline--default-mode-line-format-backup (default-value 'mode-line-format)))))
-  (setq-default mode-line-format value)
-  (let ((actual-value (if (eq value :default)
-                          (default-value 'mode-line-format)
-                        value)))
+
+  (let ((final-value
+         (cond
+          ((eq value :default) (default-value 'mode-line-format)) ; If :default, use Emacs's default
+          (t value)))) ; Otherwise, use the provided value (nil or something else)
+
+    (setq-default mode-line-format final-value) ; Apply to default (global)
+
     (dolist (win (window-list nil 'all))
       (with-selected-window win
-        (setq mode-line-format actual-value)
+        (setq mode-line-format final-value) ; Apply to window-local
         (force-mode-line-update t)))
     (dolist (buf (buffer-list))
       (with-current-buffer buf
-        (setq mode-line-format actual-value))))
+        (setq mode-line-format final-value)))) ; Apply to buffer-local
   (force-mode-line-update t))
 
 (defun taoline--autohide-modeline-globally ()
@@ -148,25 +151,26 @@ If BACKUP-RESTORE is non-nil, backup or restore `default-mode-line-format'."
 
 (defun taoline--posframe-show (win)
   "Show or update the posframe in window WIN, including minibuffer window."
-  (let* ((buffer (window-buffer win))
-         (frame-w (frame-width (window-frame win)))
-         (width   (max 1 (1- frame-w)))
-         (str     (taoline-compose-modeline buffer win width))
-         (pfname  (intern (format " taoline-posframe-%s"
-                                  (or (window-parameter win 'window-id)
-                                      (window-buffer win))))))
-    (puthash win pfname taoline--posframe-table)
-    (posframe-show
-     pfname
-     :string               str
-     :position             (window-point win)
-     :parent-window        win
-     :width                width
-     :left-fringe          0
-     :right-fringe         0
-     :internal-border-width 0
-     :border-width         0
-     :background-color     (face-attribute 'mode-line :background nil t))))
+  (when (windowp win)
+    (let* ((buffer (window-buffer win))
+           (frame-w (frame-width (window-frame win)))
+           (width   (max 1 (1- frame-w)))
+           (str     (taoline-compose-modeline buffer win width))
+           (pfname  (intern (format " taoline-posframe-%s"
+                                    (or (window-parameter win 'window-id)
+                                        (window-buffer win))))))
+      (puthash win pfname taoline--posframe-table)
+      (posframe-show
+       pfname
+       :string               str
+       :position             (window-point win)
+       :parent-window        win
+       :width                width
+       :left-fringe          0
+       :right-fringe         0
+       :internal-border-width 0
+       :border-width         0
+       :background-color     (face-attribute 'mode-line :background nil t)))))
 (unless (fboundp 'taoline--posframe-show)
   (defalias 'taoline--posframe-show #'taoline--posframe-show))
 
@@ -187,10 +191,12 @@ Supported values: modeline, echo, posframe"
            (taoline--switch-backend val))))
 
 (defcustom taoline-segments
-  '((:left taoline-segment-project-name taoline-segment-git-branch taoline-segment-icon-and-buffer)
+  '((:left taoline-segment-icon-and-buffer taoline-segment-git-branch taoline-segment-project-name)
+    (:center taoline-segment-echo-message)
     (:right taoline-segment-battery taoline-segment-major-mode taoline-segment-time))
   "List of segments to display in the modeline.
-:LEFT and :RIGHT are lists of segment *function symbols*."
+:LEFT, :CENTER and :RIGHT are lists of segment *function symbols*.
+:CENTER will expand to fill all available space and be truncated to fit."
   :type '(alist :key-type symbol :value-type (repeat function))
   :group 'taoline)
 
@@ -217,9 +223,24 @@ This variable does not currently affect the 'modeline backend (in-window modelin
 ;; Faces
 
 (defface taoline-base-face
-  '((t :inherit mode-line))
-  "Base face for taoline."
+  '((t :inherit mode-line
+       :height 1.0
+       :family "default"
+       :box nil
+       :underline nil
+       :overline nil
+       :inverse-video nil
+       :extend t
+       :align-to baseline)) ; align pretty text and icons
+  "Base face for taoline with fixed height and baseline alignment to prevent jumping."
   :group 'taoline)
+
+(defface taoline-echo-face
+  '((t :inherit shadow))
+  "Face for echo message segment."
+  :group 'taoline)
+
+
 
 (defface taoline-time-face
   '((t :inherit success))
@@ -323,7 +344,7 @@ If ARGS is an empty list, function will be called with no arguments."
     (error (propertize (format "[SEGMENT ERROR: %s]" err) 'face 'error))))
 
 (defun taoline--collect-segments (side buffer)
-  "Return list of rendered segment strings for SIDE (:left/:right) in BUFFER, skipping empty segments."
+  "Return list of rendered segment strings for SIDE (:left/:right/:center) in BUFFER, skipping empty segments."
   (cl-loop for fn in (cdr (assq side taoline-segments))
            for str = (taoline--apply-segment fn buffer)
            unless (or (null str) (string= str ""))
@@ -339,9 +360,25 @@ If WINDOW is nil, the selected window is used.
 
 Для posframe/echo backends учитываем ширину фрейма/минибуфера, иначе окна.
 Для backend 'modeline' отрисовываем всегда, даже для служебных буферов (никаких исключений)."
-  (let* ((buffer (or buffer (current-buffer)))
-         (window (or window (selected-window))))
-    (when (windowp window)
+  ;; Всегда работаем именно с окном.
+  ;; 1. Если явно передали окно — используем его.
+  ;; 2. Если передали фрейм — берём выбранное в нём окно.
+  ;; 3. Если ничего не передали — берём (selected-window).
+  (let* ((window
+          (cond
+           ((windowp (or window (selected-window)))
+            (or window (selected-window)))
+           ((framep (or window (selected-window)))
+            (frame-selected-window (or window (selected-window))))
+           (t (selected-window))))
+         ;; Буфер по умолчанию — буфер этого окна, а не текущий,
+         ;; что надёжнее при вычислении mode-line разных окон.
+         (buffer (or buffer (window-buffer window))))
+    ;; Если по ошибке передан фрейм, берём выбранное в нём окно.
+    (when (framep window)
+      (setq window (frame-selected-window window)))
+    ;; Продолжаем только для «живых» окон
+    (when (and (windowp window) (window-live-p window))
       (let* ((width (or width
                         (cond
                          ((eq taoline--active-backend 'posframe)
@@ -354,16 +391,29 @@ If WINDOW is nil, the selected window is used.
                          (t (window-width window)))))
              (left (mapconcat #'identity (taoline--collect-segments :left buffer) " "))
              (right (mapconcat #'identity (taoline--collect-segments :right buffer) " "))
-             (mid-space (max 1 (- width (string-width left) (string-width right) taoline-right-padding 1)))) ; Subtract 1 more to prevent early wrapping
-        (taoline--log "[compose-modeline] buffer=%S, major-mode=%S, window=%S, left='%s', right='%s', width=%s, mid-space=%s taoline-right-padding=%s"
+             (center (mapconcat #'identity (taoline--collect-segments :center buffer) " "))
+             ;; Compute width for center (all free space between left and right)
+             (center-width (max 0 (- width (string-width left) (string-width right) taoline-right-padding 2))) ; -2 cushion
+             (center-trunc (if (> (string-width center) center-width)
+                               (truncate-string-to-width center center-width nil nil "…")
+                             (progn
+                               (concat center (make-string (max 0 (- center-width (string-width center))) ?\s)))))
+             (sep-left (if (string= left "") "" " "))
+             (sep-right (if (string= right "") "" " ")))
+        (taoline--log "[compose-modeline] buffer=%S, major-mode=%S, window=%S, left='%s', center='%s', right='%s', width=%s, center-width=%s taoline-right-padding=%s"
                        (buffer-name buffer)
                        (with-current-buffer buffer major-mode)
-                       window left right width mid-space taoline-right-padding)
+                       window left center right width center-width taoline-right-padding)
         (concat
-         (propertize left 'face 'taoline-base-face)
-         (propertize (make-string mid-space ?\s) 'face 'taoline-base-face)
-         (propertize right 'face 'taoline-base-face)
-         (propertize (make-string (max 0 taoline-right-padding) ?\s) 'face 'taoline-base-face))))))
+         (propertize
+          (concat
+           left
+           sep-left
+           center-trunc
+           sep-right
+           right
+           (make-string (max 0 taoline-right-padding) ?\s))
+          'face 'taoline-base-face))))))
 
 
 ;; ----------------------------------------------------------------------------
@@ -372,22 +422,56 @@ If WINDOW is nil, the selected window is used.
 (defvar taoline--mode-line-format-backup nil
   "Backup of the initial global `mode-line-format` before taoline modified it.")
 
-(defun taoline--single-window-modeline-update ()
-  "Показывать taoline только в активном окне, в остальных отключать mode-line."
+;; ----------------------------------------------------------------------
+(defun taoline--single-window-modeline-setup ()
+  "Set up taoline to render in the usual window mode-line.
+Гарантирует передачу window, а не frame, в `taoline-compose-modeline`."
+  (taoline--log "[single-window-modeline-setup] (safe redefinition)")
+  (setq-default
+   mode-line-format
+   '((:eval
+      ;; BUFFER — current-buffer; WIDTH определяется самой функции.
+      (taoline-compose-modeline nil (selected-window))))))
+;; Немедленно обновляем mode-line, чтобы исправление вступило в силу.
+
+(defun taoline--single-window-modeline-update (&rest _)
+  "Показывать taoline только в «логически активном» окне, скрывать modeline у остальных (per-window, не трогая локально buffer)."
+  (taoline--log "[swmu] --- taoline--single-window-modeline-update called. Backend: %S. Selected win: %S / buffer: %s"
+                taoline--active-backend
+                (selected-window)
+                (buffer-name (window-buffer (selected-window))))
   (when (eq taoline--active-backend 'modeline)
-    (let ((selwin (selected-window)))
+    ;; Находим истинное NORMAL окно: игнорируем minibuffer, или если Emacs вдруг решил его выбрать
+    (let* ((all-wins (window-list nil 'no-minibuffer (selected-frame)))
+           (main-win
+            (car (or all-wins
+                     (list (selected-window))))))
       (walk-windows
        (lambda (win)
-         (with-current-buffer (window-buffer win)
-           (taoline--log "[single-win-modeline] window=%S, buffer=%S, major-mode=%S, selected=%S"
-                         win (buffer-name) major-mode (eq win selwin))
-           (if (eq win selwin)
-               (progn
-                 (setq-local mode-line-format '((:eval (taoline-compose-modeline (current-buffer) win))))
-                 (taoline--log "[single-win-modeline] SET taoline in %S" (buffer-name)))
-             (when (local-variable-p 'mode-line-format)
-               (kill-local-variable 'mode-line-format)
-               (taoline--log "[single-win-modeline] UNSET taoline in %S" (buffer-name))))))
+         (let* ((buf (window-buffer win))
+                (is-main (eq win main-win))
+                (is-minibuf (minibufferp buf))
+                (local-ml (with-current-buffer buf (and (local-variable-p 'mode-line-format) mode-line-format))))
+           (taoline--log "[swmu] win=%s buffer=%s is-main=%S is-minibuf=%S BEFORE: window-param=%S, local mode-line=%S"
+                         win (buffer-name buf) is-main is-minibuf
+                         (window-parameter win 'mode-line-format) local-ml)
+           (when (window-parameter win 'mode-line-format)
+             (taoline--log "[swmu] win=%s: Clearing previous window-parameter 'mode-line-format'" win)
+             (set-window-parameter win 'mode-line-format nil))
+           (cond
+            (is-main
+             (set-window-parameter win 'mode-line-format
+                                   `((:eval (taoline-compose-modeline (window-buffer ,win) ,win))))
+             (taoline--log "[swmu] SET taoline modeline in win=%s buffer=%s" win (buffer-name buf)))
+            (t
+             (set-window-parameter win 'mode-line-format nil)
+             (taoline--log "[swmu] UNSET modeline (set window-param nil) in win=%s buffer=%s" win (buffer-name buf))))
+           (with-current-buffer buf
+             (let ((post-ml (and (local-variable-p 'mode-line-format) mode-line-format)))
+               (taoline--log "[swmu] win=%s, buffer=%s: AFTER set. local mode-line=%S, window-param=%S"
+                             win (buffer-name buf)
+                             post-ml (window-parameter win 'mode-line-format)))
+             (force-mode-line-update t))))
        nil 'visible))))
 
 (defun taoline--mod-hooks (action hooks fn)
@@ -396,31 +480,38 @@ If WINDOW is nil, the selected window is used.
     (funcall action hook fn)))
 
 (defconst taoline--modeline-update-hooks
-  '(window-selection-change-functions window-configuration-change-hook)
+  ;; window-selection-change-functions — только Emacs 27+, но window-configuration-change-hook — всегда.
+  '(window-selection-change-functions window-configuration-change-hook window-size-change-functions)
   "Hooks relevant for single-window modeline change.")
 
-(defun taoline--single-window-modeline-setup ()
-  "Включить taoline только на активном окне."
-  (unless taoline--mode-line-format-backup
-    (setq taoline--mode-line-format-backup (default-value 'mode-line-format)))
-  (taoline--mod-hooks #'add-hook taoline--modeline-update-hooks #'taoline--single-window-modeline-update)
-  (when (fboundp 'buffer-list-update-hook)
-    (add-hook 'buffer-list-update-hook #'taoline--single-window-modeline-update))
-  (unless (boundp 'window-selection-change-functions)
-    (add-hook 'post-command-hook #'taoline--single-window-modeline-update))
-  (taoline--single-window-modeline-update))
 
 (defun taoline--single-window-modeline-teardown ()
   "Восстановить обычные mode-line, отключить taoline в modeline."
+  (taoline--log "[teardown] called: restoring mode-line globally and unsetting per-window param")
+  ;; Удаляем только window-parameter, НЕ трогаем buffer local!
+  (walk-windows
+   (lambda (win)
+     (let* ((buf (window-buffer win))
+            (pre-window-param (window-parameter win 'mode-line-format))
+            (pre-local-mode-line
+             (with-current-buffer buf (and (local-variable-p 'mode-line-format) mode-line-format))))
+       (taoline--log "[teardown] before win=%s buffer=%s  window-param=%S, local mode-line=%S"
+                     win (buffer-name buf) pre-window-param pre-local-mode-line)
+       (set-window-parameter win 'mode-line-format nil)
+       (with-current-buffer buf
+         (force-mode-line-update t)
+         (let ((post-local-mode-line
+                (and (local-variable-p 'mode-line-format) mode-line-format)))
+           (taoline--log "[teardown] after  win=%s buffer=%s  window-param=%S  local mode-line=%S"
+                         win (buffer-name buf)
+                         (window-parameter win 'mode-line-format)
+                         post-local-mode-line))))))
   (when taoline--mode-line-format-backup
+    (taoline--log "[teardown] restoring default mode-line-format globally: %S" taoline--mode-line-format-backup)
     (setq-default mode-line-format taoline--mode-line-format-backup))
-  (dolist (buf (buffer-list))
-    (with-current-buffer buf
-      (when (local-variable-p 'mode-line-format)
-        (kill-local-variable 'mode-line-format))))
   (taoline--mod-hooks #'remove-hook taoline--modeline-update-hooks #'taoline--single-window-modeline-update)
-  (when (fboundp 'buffer-list-update-hook)
-    (remove-hook 'buffer-list-update-hook #'taoline--single-window-modeline-update))
+  (remove-hook 'buffer-list-update-hook #'taoline--single-window-modeline-update)
+  (remove-hook 'window-state-change-hook #'taoline--single-window-modeline-update)
   (remove-hook 'post-command-hook #'taoline--single-window-modeline-update)
   (setq taoline--mode-line-format-backup nil))
 
@@ -435,7 +526,7 @@ If WINDOW is nil, the selected window is used.
   (when (and (featurep 'projectile) (buffer-file-name buffer))
     (let ((prj (projectile-project-name)))
       (when (and prj (not (string= prj "-")))
-        (propertize prj 'face 'font-lock-constant-face)))))
+        (propertize (concat "(" prj ")") 'face 'font-lock-constant-face)))))
 
 (taoline-define-segment taoline-segment-icon-and-buffer (buffer)
   "Display major mode icon (all-the-icons) and buffer/file-name (* if modified), optimized."
@@ -456,6 +547,18 @@ If WINDOW is nil, the selected window is used.
 (taoline-define-simple-segment taoline-segment-time
   "Display current time."
   (propertize (format-time-string "%H:%M") 'face 'taoline-time-face))
+
+(taoline-define-simple-segment taoline-segment-echo-message
+  "Show last message from echo area, truncated to available width."
+  (let* ((msg
+          (or
+           (with-current-buffer (get-buffer "*Messages*")
+             (save-excursion
+               (goto-char (point-max))
+               (if (bobp) "" (progn (forward-line -1) (buffer-substring-no-properties (line-beginning-position) (line-end-position))))))
+           ""))
+         (clean (replace-regexp-in-string "[\n\t]" " " msg)))
+    (propertize (concat "|" clean "|") 'face 'taoline-echo-face)))
 
 (taoline-define-segment taoline-segment-buffer-name (buffer)
   "Display current buffer name, with * if modified."
@@ -576,6 +679,8 @@ Adds debug output to *taoline-logs* if debugging is enabled."
   "Echo backend required hooks list.")
 
 (defun taoline--echo-setup ()
+  (when taoline-autohide-modeline
+    (taoline--autohide-modeline-globally))
   (taoline--mod-hooks #'add-hook '(post-command-hook) #'taoline--echo-refresh-if-empty)
   (taoline--mod-hooks #'add-hook '(minibuffer-exit-hook) #'taoline--echo-minibuffer-exit-refresh)
   (when (and (boundp 'echo-area-clear-hook)
@@ -608,8 +713,72 @@ Adds debug output to *taoline-logs* if debugging is enabled."
     (remove-hook 'echo-area-clear-hook #'taoline--echo-clear-refresh)
     (setq taoline--echo-clear-hooked nil))
   (setq taoline--echo-postcmd-hooked nil taoline--echo-minibuf-hooked nil)
+  (taoline--unhide-modeline-globally)
   (let ((msg (current-message)))
     (when (or (null msg) (string-match-p "\\`[ \t\n\r]*\\'" msg)) (message ""))))
+
+;; -- Modeline backend (shows taoline only in selected window, hides in others)
+
+;; For a clean teardown we must be able to restore the exact modeline each
+;; window had before taoline touched it.  We therefore remember the original
+;; value in a dedicated window-parameter called
+;; `taoline--saved-mode-line-format'.
+
+(defun taoline--modeline--post-command ()
+  "Update taoline modeline so that it is shown only in the selected window."
+  (taoline--modeline-update nil))
+
+(defun taoline--modeline-setup ()
+  "Show taoline in the current window's modeline, hide in all other windows."
+  (taoline--modeline-update nil)
+  (add-hook 'post-command-hook #'taoline--modeline--post-command)
+  (add-hook 'window-configuration-change-hook #'taoline--modeline--post-command)
+  (when (boundp 'window-state-change-hook)
+    (add-hook 'window-state-change-hook #'taoline--modeline--post-command))
+  (add-hook 'buffer-list-update-hook #'taoline--modeline--post-command)
+  (force-mode-line-update t))
+
+(defun taoline--modeline-update (_str)
+  "Show taoline only in the selected window, hide it in all others.
+Before the first override of any window we store its original value of
+`mode-line-format' in the helper parameter
+`taoline--saved-mode-line-format' so it can be restored later."
+  (let ((selected (selected-window)))
+    (walk-windows
+     (lambda (win)
+       (with-selected-window win
+         ;; Save the original setting once.
+         (unless (window-parameter win 'taoline--saved-mode-line-format)
+           (set-window-parameter
+            win 'taoline--saved-mode-line-format
+            (window-parameter win 'mode-line-format)))
+         (if (eq win selected)
+             ;; Selected window → show taoline.
+             (set-window-parameter win 'mode-line-format
+                                   '(:eval (taoline-compose-modeline)))
+           ;; Other windows → hide modeline.
+           (set-window-parameter win 'mode-line-format nil))))
+     nil t))
+  (force-mode-line-update t))
+
+(defun taoline--modeline-teardown ()
+  "Restore each window's original modeline and remove hooks."
+  (remove-hook 'post-command-hook #'taoline--modeline--post-command)
+  (remove-hook 'window-configuration-change-hook #'taoline--modeline--post-command)
+  (when (boundp 'window-state-change-hook)
+    (remove-hook 'window-state-change-hook #'taoline--modeline--post-command))
+  (remove-hook 'buffer-list-update-hook #'taoline--modeline--post-command)
+
+  ;; Walk through all windows, restore the saved modeline, and clean up
+  ;; helper parameters.
+  (walk-windows
+   (lambda (win)
+     (with-selected-window win
+       (let ((saved (window-parameter win 'taoline--saved-mode-line-format)))
+         (set-window-parameter win 'mode-line-format saved)
+         (set-window-parameter win 'taoline--saved-mode-line-format nil))))
+   nil t)
+  (force-mode-line-update t))
 
 ;; -- Posframe backend
 
@@ -618,12 +787,17 @@ Adds debug output to *taoline-logs* if debugging is enabled."
 
 (defun taoline--posframe-setup ()
   (require 'posframe)
+  (when taoline-autohide-modeline
+    (taoline--autohide-modeline-globally))
   (ignore-errors (posframe-delete taoline--posframe-buffer)))
 
 (defun taoline--posframe-update (str)
   (require 'posframe)
-  (let* ((width (frame-width))
-         (mono-str (propertize str 'face 'taoline-posframe-face)))
+  ;; Гарантированно одна строка, убираем \n (если по ошибке попал):
+  (let* ((clean-str (replace-regexp-in-string "\n" " " str))
+         ;; Вычисляем ширину текущего окна, чтобы posframe занимал ровно столько символов
+         (width (window-width (frame-selected-window)))
+         (mono-str (propertize clean-str 'face 'taoline-posframe-face)))
     (posframe-show
      taoline--posframe-buffer
      :string mono-str
@@ -632,20 +806,42 @@ Adds debug output to *taoline-logs* if debugging is enabled."
      :min-width width
      :max-width width
      :min-height 1
+     :max-height 1
      :border-width 0
      :override-parameters
-     '((font . "monospace") (left-fringe . 0) (right-fringe . 0)
-       (vertical-scroll-bars . nil)))))
+     '((font . "monospace")
+       (left-fringe . 0)
+       (right-fringe . 0)
+       (vertical-scroll-bars . nil)
+       (line-spacing . 0))) ;; Явно убираем доп. высоту строк
+    ))
 
 (defun taoline--posframe-teardown ()
+  "Полностью удалить и скрыть posframe и его буфер, даже если был сбой."
   (ignore-errors
     (require 'posframe)
     (when (fboundp 'posframe-hide)
       (posframe-hide taoline--posframe-buffer))
-    (posframe-delete taoline--posframe-buffer)))
+    (when (fboundp 'posframe-delete)
+      (posframe-delete taoline--posframe-buffer))
+    ;; Дополнительно удалим сам буфер, если он вдруг остался
+    (let ((buf (get-buffer taoline--posframe-buffer)))
+      (when buf (kill-buffer buf))))
+  (taoline--unhide-modeline-globally))
 
 ;; ----------------------------------------------------------------------------
 ;; Backend dispatcher
+
+(defvar taoline--backend-table
+  '((echo    (setup . taoline--echo-setup)
+             (update . taoline--echo-update)
+             (teardown . taoline--echo-teardown))
+    (modeline (setup . taoline--modeline-setup)
+              (update . taoline--modeline-update)
+              (teardown . taoline--modeline-teardown))
+    (posframe (setup . taoline--posframe-setup)
+              (update . taoline--posframe-update)
+              (teardown . taoline--posframe-teardown))))
 
 (defun taoline--backend-action (backend key &optional arg)
   "Call backend handler for BACKEND and action KEY. Pass ARG if needed."
@@ -656,17 +852,15 @@ Adds debug output to *taoline-logs* if debugging is enabled."
        (taoline--backend-action backend 'setup))
 (defun taoline--backend-update  (backend str) (taoline--log "[taoline debug] backend-update: backend=%s, str='%s'" backend str)
        (taoline--backend-action backend 'update str))
-(defun taoline--backend-teardown(backend) (taoline--backend-action backend 'teardown))
-
-(defun taoline--backend-teardown (backend)
-  (taoline--log "[taoline debug] backend-teardown: %S" backend)
-  (taoline--backend-action backend 'teardown))
+(defun taoline--backend-teardown(backend) (taoline--log "[taoline debug] backend-teardown: %S" backend)
+       (taoline--backend-action backend 'teardown))
 
 (defun taoline--set-backend (backend)
-  "Switch to BACKEND, handling setup/teardown."
+  "Switch to BACKEND, handling setup/teardown and cleanup."
   (unless (eq backend taoline--active-backend)
     (when taoline--active-backend
-      (taoline--backend-teardown taoline--active-backend))
+      (taoline--backend-teardown taoline--active-backend)
+      (taoline-reset-all-lines)) ;; Сброс спецэффектов всех окон обязательно!
     (setq taoline--active-backend backend)
     (setq taoline--last-str "")
     (taoline--backend-setup backend)))
@@ -749,9 +943,11 @@ In echo mode: ALWAYS refresh into echo area if it is empty or whitespace (even i
         (taoline--add-hooks)
         (taoline--maybe-update))
     (taoline--remove-hooks)
-    (taoline-reset-all-lines)
     (when taoline--active-backend
       (taoline--backend-teardown taoline--active-backend))
+    (taoline-reset-all-lines)
+    ;; Всегда корректно скрываем posframe, если он остался
+    (taoline--posframe-teardown)
     (setq taoline--active-backend nil)))
 
 ;;;###autoload
@@ -763,27 +959,53 @@ In echo mode: ALWAYS refresh into echo area if it is empty or whitespace (even i
 
 ;;;###autoload
 (defun taoline-reset-all-lines ()
-  "Forcefully restore all mode-line format in every window to
-their original (pre-Taoline) values.
-
-Useful when Taoline visuals get corrupted or you simply want to return to the
-standard Emacs look without disabling the package entirely.  The function
-ignores the currently active backend and just re-applies the values saved by
-Taoline when it first replaced them.
-
-It is safe to call at any time; if Taoline was not active in a window, nothing
-is changed there."
+  "Restore all default modelines and remove window-parameter shadowing for mode-line-format."
   (interactive)
+  (dolist (win (window-list nil 'nomini))
+    (with-selected-window win
+      (set-window-parameter win 'mode-line-format nil)))
+  (setq taoline--last-taoline-window nil)
+  (force-mode-line-update t)
+  (message "Taoline: all mode-lines forcibly reset to global mode-line-format."))
+
+(defface taoline-posframe-face
+  '((t :inherit default))
+  "Face for the Taoline posframe text.")
+
+(force-mode-line-update t)
+
+;; ---------------------------------------------------------------------------
+;; Patch: make sure the modeline backend is completely torn down
+;; ---------------------------------------------------------------------------
+
+(defun taoline--modeline-clear-all-params ()
+  "Remove any taoline‐related `mode-line-format' overrides in every window."
   (walk-windows
    (lambda (win)
-     (with-selected-window win
-       (set-window-parameter win 'mode-line-format nil)
-       (set-window-parameter win 'taoline--modeline-old nil)
-       (force-mode-line-update t)))
+     (set-window-parameter win 'mode-line-format nil)
+     (set-window-parameter win 'taoline--saved-mode-line-format nil))
    nil t)
-  (setq taoline--active-backend nil)
-  (message "Taoline: all mode-lines forcibly reset to true default (global mode-line-format)."))
+  (force-mode-line-update t))
 
+(defun taoline--modeline-teardown ()
+  "Completely disable taoline modeline backend.
+Restores original mode-lines, removes every hook we installed and clears
+internal caches so no further calls to `taoline-compose-modeline' (and
+therefore no log messages) are made."
+  ;; Remove every hook we added
+  (remove-hook 'post-command-hook #'taoline--modeline--post-command)
+  (remove-hook 'window-configuration-change-hook #'taoline--modeline--post-command)
+  (when (boundp 'window-state-change-hook)
+    (remove-hook 'window-state-change-hook #'taoline--modeline--post-command))
+  (remove-hook 'buffer-list-update-hook #'taoline--modeline--post-command)
+
+  ;; Clear all window parameters we touched
+  (taoline--modeline-clear-all-params)
+
+  ;; Reset cached rendered string so nothing stale is reused
+  (setq taoline--last-str ""))
+
+;; ---------------------------------------------------------------------------
 (provide 'taoline)
 
 ;;; taoline.el ends here
