@@ -68,9 +68,9 @@
         (insert msg "\n")))))
 
 (defcustom taoline-segments
-  '((:left taoline-segment-icon-and-buffer taoline-segment-git-branch taoline-segment-project-name)
+  '((:left taoline-segment-project-name taoline-segment-git-branch taoline-segment-icon-and-buffer)
     (:center taoline-segment-echo-message)
-    (:right taoline-segment-battery taoline-segment-major-mode taoline-segment-time))
+    (:right taoline-segment-battery taoline-segment-time))
   "Alist describing segments for :left, :center и :right.
 Каждое значение – список *символов-функций* сегмента."
   :type '(alist :key-type symbol :value-type (repeat function))
@@ -107,32 +107,32 @@
   :group 'taoline)
 
 (defface taoline-echo-face
-  '((t :inherit shadow))
+  '((t :inherit (shadow taoline-base-face) :height 1.0))
   "Face for echo message segment."
   :group 'taoline)
 
 (defface taoline-time-face
-  '((t :inherit success))
+  '((t :inherit (success taoline-base-face) :height 1.0))
   "Face for time segment."
   :group 'taoline)
 
 (defface taoline-buffer-face
-  '((t :inherit mode-line-buffer-id))
+  '((t :inherit (mode-line-buffer-id taoline-base-face) :height 1.0))
   "Face for buffer name segment."
   :group 'taoline)
 
 (defface taoline-modified-face
-  '((t :inherit warning))
+  '((t :inherit (warning taoline-base-face) :height 1.0))
   "Face for modified indicator segment."
   :group 'taoline)
 
 (defface taoline-git-face
-  '((t :inherit font-lock-keyword-face))
+  '((t :inherit (font-lock-keyword-face taoline-base-face) :height 1.0))
   "Face for git branch segment."
   :group 'taoline)
 
 (defface taoline-mode-face
-  '((t :inherit font-lock-type-face))
+  '((t :inherit (font-lock-type-face taoline-base-face) :height 1.0))
   "Face for major mode segment."
   :group 'taoline)
 
@@ -289,7 +289,8 @@ If BACKUP-RESTORE is non-nil, take/restore backup of default."
     (when (or (not (string-equal str taoline--last-str))
               (null cur-msg))
       (setq taoline--last-str str)
-      (message "%s" str))))
+        (let ((message-log-max nil))
+        (message "%s" str)))))
 
 (defun taoline--update (&rest _)
   "Recompute modeline for `selected-window' and display.
@@ -317,6 +318,15 @@ Skips update (and clears) during isearch or minibuffer input."
 ;; ----------------------------------------------------------------------------
 ;; Minor mode
 
+(defcustom taoline-timer-interval 10
+  "Interval in seconds for updating time and battery segments.
+The timer will not run more often than this interval."
+  :type 'number
+  :group 'taoline)
+
+(defvar taoline--timer nil
+  "Internal timer used by `taoline-mode' for periodic updates.")
+
 ;;;###autoload
 (define-minor-mode taoline-mode
   "Global minor mode that displays a functional minimalist modeline in echo-area."
@@ -337,7 +347,11 @@ Skips update (and clears) during isearch or minibuffer input."
         (add-hook 'minibuffer-exit-hook     #'taoline--update)
         (add-hook 'isearch-mode-hook        #'taoline--clear-display)
         (add-hook 'isearch-mode-end-hook    #'taoline--update)
-        (taoline--update))
+        (taoline--update)
+        (setq taoline--timer
+              (run-with-timer taoline-timer-interval
+                              taoline-timer-interval
+                              #'taoline--update)))
     ;; turn off
     (dolist (hook taoline-update-hooks)
       (remove-hook hook #'taoline--update))
@@ -350,6 +364,10 @@ Skips update (and clears) during isearch or minibuffer input."
     (remove-hook 'isearch-mode-end-hook    #'taoline--update)
     (when taoline-autohide-modeline
       (taoline--unhide-modeline-globally))
+    ;; Cancel the periodic timer
+    (when (timerp taoline--timer)
+      (cancel-timer taoline--timer)
+      (setq taoline--timer nil))
     ;; Restore minibuffer resize behavior
     (when taoline--resize-mini-windows-backup
       (setq resize-mini-windows taoline--resize-mini-windows-backup)
@@ -363,14 +381,22 @@ Skips update (and clears) during isearch or minibuffer input."
 ;; Имя буфера + ‘*’ если modified
 (taoline-define-simple-segment taoline-segment-icon-and-buffer
   "Buffer name with optional icon and modified flag."
-  (concat
-   (when (and (featurep 'all-the-icons)
-              (buffer-file-name))
-     (all-the-icons-icon-for-file (file-name-nondirectory (buffer-file-name)) :v-adjust 0))
-   " "
-   (propertize (buffer-name) 'face 'taoline-buffer-face)
-   (when (buffer-modified-p)
-     (propertize " *" 'face 'taoline-modified-face))))
+  (let* ((icon (when (featurep 'all-the-icons)
+                 (if (buffer-file-name)
+                     (all-the-icons-icon-for-file
+                      (file-name-nondirectory (buffer-file-name))
+                      :height 1.0 :v-adjust -0.1 :face 'taoline-base-face)
+                   (all-the-icons-icon-for-mode
+                    major-mode
+                    :height 1.0 :v-adjust -0.1 :face 'taoline-base-face))))
+         (name (propertize (buffer-name) 'face 'taoline-buffer-face))
+         (mod  (when (buffer-modified-p)
+                 (propertize " *" 'face 'taoline-modified-face))))
+    (concat
+     (or icon "")
+     " "
+     name
+     (or mod ""))))
 
 ;; Git-ветка (projectile / vc-git)
 (taoline-define-simple-segment taoline-segment-git-branch
@@ -379,7 +405,7 @@ Skips update (and clears) during isearch or minibuffer input."
     (let ((branch (vc-git--symbolic-ref (buffer-file-name))))
       (when branch
         (concat
-         (all-the-icons-octicon "git-branch" :v-adjust 0.1 :height 0.9)
+         (all-the-icons-octicon "git-branch" :v-adjust -0.1 :height 1.0 :face 'taoline-git-face)
          " "
          (propertize branch 'face 'taoline-git-face))))))
 
@@ -388,7 +414,7 @@ Skips update (and clears) during isearch or minibuffer input."
   "Project name via projectile."
   (when (and (featurep 'projectile) (projectile-project-p))
     (concat
-     (all-the-icons-octicon "briefcase" :v-adjust 0.1 :height 0.9)
+     (all-the-icons-octicon "briefcase" :v-adjust -0.1 :height 1.0 :face 'taoline-base-face)
      " "
      (projectile-project-name))))
 
@@ -406,9 +432,18 @@ Skips update (and clears) during isearch or minibuffer input."
         (propertize (cdr (assoc ?p data)) 'face 'taoline-echo-face)))))
 
 ;; Major-mode
-(taoline-define-segment taoline-segment-major-mode (buffer)
-  "Current major mode of BUFFER."
-  (propertize (format-mode-line mode-name) 'face 'taoline-mode-face))
+(taoline-define-simple-segment taoline-segment-major-mode
+  "Major mode segment with icon."
+  (let ((icon (when (and (featurep 'all-the-icons) major-mode)
+                (all-the-icons-icon-for-mode major-mode :height 0.9 :v-adjust 0))))
+    (concat
+     ;; if `icon` is a string (not a symbol placeholder), show it
+     (when (and icon (stringp icon))
+       (concat icon " "))
+     (propertize
+      (format-mode-line mode-name)
+      'face 'taoline-mode-face))))
+
 
 ;; Время
 (taoline-define-simple-segment taoline-segment-time
