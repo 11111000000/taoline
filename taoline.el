@@ -420,8 +420,12 @@ The timer will not run more often than this interval."
 
 ;; Сообщение из echo-area (для демонстрации – текущее `current-message`)
 (taoline-define-simple-segment taoline-segment-echo-message
-  "Current echo message."
-  (propertize (or (current-message) "") 'face 'taoline-echo-face))
+  "Current echo message excluding taoline itself."
+  (let* ((msg  (current-message))
+         (show (unless (or (null msg)
+                           (string-equal msg taoline--last-str))
+                 msg)))
+    (propertize (or show "") 'face 'taoline-echo-face)))
 
 ;; Сегмент батареи (если доступна `battery`)
 (taoline-define-simple-segment taoline-segment-battery
