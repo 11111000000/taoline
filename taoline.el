@@ -318,10 +318,8 @@ This function is pure: it merely returns the string and causes no side effects."
          (center (mapconcat #'identity (taoline--collect-segments :center buffer) " "))
          (left-w (string-width left))
          (right-w (string-width right))
-         ;; Insert separator spaces ONLY when needed
-         (space-left (if (and (not (string-empty-p left))
-                              (not (string-empty-p center)))
-                         "" (if (not (string-empty-p left)) " " "")))
+         ;; Always put one space before center (echo) segment
+         (space-left " ")
          (space-right (if (not (string-empty-p right)) " " ""))
          ;; The maximum room for center segment
          (available
