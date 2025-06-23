@@ -1,18 +1,18 @@
-* Taoline: Легчайшая Строка — функциональный минимализм для Emacs
+- Taoline: The Lightest Line — Functional Minimalism for Emacs
 
-В истинном равновесии не нужно ничего лишнего — и taoline отражает лишь то, что действительно занимает твоё внимание сейчас. Эта модельная строка выскакивает в echo area тогда, когда ей есть что сообщить, — но исчезает, не оставив следа, как тихий поток.
+In true equilibrium, nothing superfluous is required — and Taoline manifests but that which truly occupies thy attention in the present moment. This modeline flits into the echo area only when it has aught to impart, then vanishes without trace, as a silent brook flowing by.
 
-** Что делает taoline?
+* What doth Taoline?
 
-- Показывает только необходимое — в моменте и внизу окна (echo area).
-- Архитектура строится на чистых функциях: каждый сегмент работает с буфером, не трогая глобальное состояние.
-- За основу взята простота: сегменты легко добавлять, менять местами, убирать.
-- Настройка интуитивна — ясна любому, даже тому, кто впервые увидел Emacs.
-- Отсутствие таймеров: обновление происходит мягко — только при действиях пользователя.
+- Sheweth only what is needful — in the very moment and at the foot of the window (echo area).
+- Her architecture resteth upon pure functions: each segment doth commune with the buffer, disturbing not the global state.
+- Simplicity is esteemed above all: segments may be added, transposed, or omitted with the lightest touch.
+- Her configuration is intuitive — transparent unto any who cast their gaze upon Emacs for the first occasion.
+- Bereft of timers: renewal occurreth gently, solely upon morrowings of thine own action.
 
-** Первый шаг
+* The Initial Step
 
-Установить taoline можно так:
+To summon Taoline unto thy presence, proceed thusly:
 
 #+BEGIN_SRC emacs-lisp
 (use-package taoline
@@ -21,15 +21,15 @@
   (taoline-mode 1))
 #+END_SRC
 
-Чтобы включить taoline:
+To enable Taoline:
 
 #+BEGIN_SRC emacs-lisp
 (taoline-mode 1)
 #+END_SRC
 
-** Индивидуальная настройка: танец сегментов
+* The Art of Personalisation: The Dance of Segments
 
-Все сегменты собираются в списке `taoline-segments`. Каждый записан как чистая функция (buffer → string):
+All segments assemble within the list =taoline-segments=. Each is scribed as a pure function (buffer → string):
 
 #+BEGIN_SRC emacs-lisp
 (setq taoline-segments
@@ -38,48 +38,50 @@
         (:right taoline-segment-project-name taoline-segment-time)))
 #+END_SRC
 
-Менять порядок, добавлять и убирать сегменты — просто редактируй этот список. Левый (:left), центральный (:center), правый (:right) блоки — между ними пространство возникнет, если нужно.
+To alter the sequence, or to add or remove segments, simply edit this list. The left (:left), central (:center), and right (:right) divisions — amongst them space shall arise as necessity demandeth.
 
-** Медитирующий над расширением: как создать свой сегмент
+* The Meditative Extension: How To Fashion Thine Own Segment
 
-Каждая часть taoline — отдельная функция, не касающаяся ни других, ни глобального мира. Создать новый сегмент — дело одной запятой:
+Each portion of Taoline is a solitary function, entwined neither with others nor with the wide world. To create a new segment is but the work of a single comma:
 
 #+BEGIN_SRC emacs-lisp
 (taoline-define-segment taoline-segment-buffer-size (buffer)
-  "Показывает размер буфера."
+  "Displayeth the magnitude of the buffer."
   (format "%.1fK" (/ (buffer-size buffer) 1024.0)))
 #+END_SRC
 
-Затем добавь его в нужный раздел:
+Then place it within the chosen quarter:
 
 #+BEGIN_SRC emacs-lisp
 (push 'taoline-segment-buffer-size (alist-get :right taoline-segments))
 #+END_SRC
 
-** Пусть echo area течёт спокойно
+* Permit the Echo Area to Flow Peacefully
 
-Taoline показывает себя в echo area только тогда, когда там нет других сообщений. Всё, что важнее — например, minibuffer, isearch или ваши сообщения — имеет приоритет. Стандартная modeline скрывается (если хочется — это поведение опционально).
+Taoline revealeth herself in the echo area only when no other message is present. All matters of weightier import — be it the minibuffer, an isearch, or thine own dispatches — possess priority. The customary modeline is obscured (shouldst thou so desire — this behaviour is optional).
 
-** Частые вопросы
+* Frequent Inquiries
 
-- *Где моя mode-line?*  
-  Исчезла в знак уважения к Пустоте. Она вернётся, когда отключишь `taoline-mode`.
+- /Wherefore is my mode-line vanished?/  
+  It hath absented itself in homage to the Void. It shall reappear when =taoline-mode= is disabled.
 
-- *Почему иногда сообщение taoline исчезает?*  
-  Когда Emacs чем-то занят — выводит свои уведомления или работает minibuffer — taoline уступает дорогу.
+- /Wherefore doth the message of Taoline at times vanish suddenly?/  
+  When Emacs is otherwise engaged — emitting its own notifications or contending with the minibuffer — Taoline courteously yieldeth precedence.
 
-- *Как добавить что-то своё?*  
-  Просто напиши функцию (buffer) → string, зарегистрируй через `taoline-define-segment`, и помести симовол этой функции в нужном месте списка сегментов.
+- /How might I add whatsoever pleases me?/  
+  Simply compose a function (buffer) → string, register it using =taoline-define-segment=, and implant the symbol of this function whither thou wilt in the segments’ list.
 
-** Где учиться искусству taoline?
+* Where May the Art of Taoline Be Studied?
 
-Загляни в исходный код или на [GitHub](https://github.com/11111000000/taoline) — там всё ясно и предельно лаконично. Логи работы (если нужно) в буфере `*taoline-logs*`.
+Peruse the source, or behold [GitHub](https://github.com/11111000000/taoline) — there all is plain and possessed of utmost clarity. Logs of her proceedings (shouldst thou require them) reside in the buffer =*taoline-logs*=.
 
-** Пример работы
+* A Glimpse of Taoline at Work
 
 #+ATTR_ORG: :width 80%
 [[file:screenshot-taoline.png]]
 
 ---
 
-Пустое пространство в строке — место для тишины.
+The empty tract upon the line — is the domain of tranquillity.
+
+*** 
