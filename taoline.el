@@ -388,38 +388,51 @@ The timer will not run more often than this interval."
 ;; Default segments (примерные реализации)
 ;; ---------------------------------------------------------------------------
 
-;; Имя буфера + ‘*’ если modified
+;; Универсальный alist для кастомных режимов — легко расширять!
+(defconst taoline-icon-alist
+  '((org-mode         . (all-the-icons-fileicon "org" :height 1.0))
+    (emacs-lisp-mode  . (all-the-icons-fileicon "elisp" :height 1.0))
+    (dired-mode       . (all-the-icons-octicon "file-directory" :height 1.0))
+    (help-mode        . (all-the-icons-octicon "question" :height 1.0)))
+  "Alist mapping major-modes to custom all-the-icons calls for taoline.")
+
+(defun taoline--get-buffer-icon (&optional buffer)
+  "Return a suitable icon string for BUFFER using all-the-icons, with fallback."
+  (let* ((default-icon (propertize "●" 'face 'taoline-base-face))
+         (buf (or buffer (current-buffer))))
+    (when (featurep 'all-the-icons)
+      (ignore-errors
+        (with-current-buffer buf
+          (let* ((file (buffer-file-name buf))
+                 (mode major-mode))
+            (or
+             ;; Пользовательская иконка для конкретного major-mode
+             (let ((entry (assoc mode taoline-icon-alist)))
+               (when entry
+                 (apply (car (cdr entry)) (cddr entry))))
+             ;; File icon, если файл есть и поддержан
+             (when file
+               (let ((ic (all-the-icons-icon-for-file
+                          (file-name-nondirectory file)
+                          :height 1.0 :v-adjust 0 :face 'taoline-base-face)))
+                 (when (and (stringp ic) (> (length ic) 0)) ic)))
+             ;; По major-mode, если есть встроенная поддержка
+             (let ((ic (all-the-icons-icon-for-mode
+                        mode :height 1.0 :v-adjust 0 :face 'taoline-base-face)))
+               (when (and (stringp ic) (> (length ic) 0)) ic))
+             ;; Фолбек
+             default-icon)))))))
+
 (defconst taoline--icon-width 3
   "Fixed icon width (in display columns) for taoline buffer icons.
 You may need to adapt this for your font & setup.")
 
 (taoline-define-simple-segment taoline-segment-icon-and-buffer
-  "Buffer name with optional icon and modified flag, robust to unknown/unsupported major-modes."
-  (let* ((default-icon (propertize "●" 'face 'taoline-base-face)) ;; choose what you like ("•" "○" etc)
-         (icon (when (featurep 'all-the-icons)
-                 (ignore-errors
-                   (let ((file (buffer-file-name))
-                         (mode (or major-mode 'fundamental-mode)))
-                     (cond
-                      ((eq mode 'org-mode)
-                       (all-the-icons-fileicon "org" :height 1.0))
-                      (file
-                       (let ((ic (all-the-icons-icon-for-file
-                                  (file-name-nondirectory file)
-                                  :height 1.0 :v-adjust 0 :face 'taoline-base-face)))
-                         (if (and (stringp ic) (> (length ic) 0))
-                             ic
-                           default-icon)))
-                      (t
-                       (let ((ic (all-the-icons-icon-for-mode
-                                  mode :height 1.0 :v-adjust 0 :face 'taoline-base-face)))
-                         (if (and (stringp ic) (> (length ic) 0))
-                             ic
-                           default-icon))))))))
-         (disp-icon (or icon default-icon))
-         (icon-str (let* ((w (string-width disp-icon))
+  "Buffer name with universal icon selection and modified flag."
+  (let* ((icon (or (taoline--get-buffer-icon) (propertize "●" 'face 'taoline-base-face)))
+         (icon-str (let* ((w (string-width icon))
                           (pad (max 0 (- taoline--icon-width w))))
-                     (concat disp-icon (make-string pad ?\s))))
+                     (concat icon (make-string pad ?\s))))
          (name (propertize (buffer-name) 'face 'taoline-buffer-face))
          (mod  (when (buffer-modified-p)
                  (propertize " *" 'face 'taoline-modified-face))))
