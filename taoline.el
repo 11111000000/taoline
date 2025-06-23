@@ -14,27 +14,27 @@
 
 ;;; Commentary:
 
-;; taoline-echo – упрощённая редакция оригинального taoline: без child-frame
-;; и без in-window modeline.  Единственный способ отображения – echo-area
-;; (мини-буфер).  Архитектура при этом остаётся функциональной: сегменты
-;; – чистые функции, композиция строки – чистая функция, реальные побочные
-;; эффекты ограничены выводом в echo-area и, опционально, скрытием штатного
-;; `mode-line`.
+;; taoline-echo is a trimmed-down edition of the original “taoline”.
+;; There is no child-frame and no in-window modeline — the only rendering
+;; target is the echo area (the minibuffer).  The architecture remains
+;; functional: every segment is a pure function, the string composition
+;; is a pure function as well, and the only side effects are writing to
+;; the echo area and (optionally) hiding the regular `mode-line`.
 ;;
-;; Основные фичи:
-;;   • минималистичная, декларативно настраиваемая конфигурация сегментов;
-;;   • отсутствие периодических таймеров – обновление только по хукам
-;;     (`post-command-hook` и др.);
-;;   • глобальный minor-mode `taoline-mode` для включения/выключения;
-;;   • автоскрытие штатной строки состояния (опционально);
-;;   • unit-testable “core” (compose-функция не имеет сайд-эффектов).
+;; Key features:
+;;   • Minimalist, declarative segment configuration.
+;;   • No polling timers — the modeline is refreshed only from hooks
+;;     (`post-command-hook`, etc.).
+;;   • Global minor mode `taoline-mode` to toggle everything on/off.
+;;   • Optional hiding of the traditional mode line.
+;;   • A unit-test-friendly “core” — the compose function is side-effect-free.
 ;;
-;; Пример включения:
+;; Quick start:
 ;;
 ;;   (require 'taoline-echo)
 ;;   (taoline-mode 1)
 ;;
-;; Смотрите README на GitHub для примеров расширения сегментов.
+;; See the README on GitHub for examples of writing custom segments.
 
 ;;; Code:
 
@@ -71,14 +71,14 @@
   '((:left taoline-segment-icon-and-buffer taoline-segment-git-branch)
     (:center taoline-segment-echo-message)
     (:right taoline-segment-project-name taoline-segment-battery taoline-segment-time))
-  "Alist describing segments for :left, :center и :right.
-Каждое значение – список *символов-функций* сегмента."
+  "Alist describing segments for :left, :center and :right.
+Each value is a list of segment function symbols."
   :type '(alist :key-type symbol :value-type (repeat function))
   :group 'taoline)
 
 (defcustom taoline-update-hooks
   '(post-command-hook find-file-hook after-save-hook)
-  "Hooks, по которым taoline пересчитывает и выводит строку."
+  "Hooks that trigger Taoline to recompute and display the modeline."
   :type '(repeat symbol)
   :group 'taoline)
 
@@ -87,7 +87,7 @@
   :type 'boolean
   :group 'taoline)
 
-(defcustom taoline-right-padding 0
+(defcustom taoline-right-padding 6
   "Spaces appended to the rightmost edge of taoline."
   :type 'integer
   :group 'taoline)
@@ -153,13 +153,16 @@
   "Hash-table storing registered segment functions.")
 
 (defvar taoline--last-str ""
-  "Last string rendered – чтобы не выводить лишний раз.")
+  "Last string that was rendered, used to avoid redundant redisplay.")
 
 (defvar taoline--default-mode-line-format-backup nil
   "Backup of `default-mode-line-format' when modeline is hidden.")
 
 (defvar taoline--resize-mini-windows-backup nil
   "Backup of `resize-mini-windows' when `taoline-mode` toggles.")
+
+(defvar-local taoline--saved-mode-line-format nil
+  "Buffer-local backup of `mode-line-format` used while `taoline-mode` hides the classical modeline.")
 
 ;; ----------------------------------------------------------------------------
 ;; Helpers for (auto)hiding the classical modeline
@@ -184,12 +187,42 @@ If BACKUP-RESTORE is non-nil, take/restore backup of default."
   (force-mode-line-update t))
 
 (defun taoline--autohide-modeline-globally ()
-  "Hide mode-line everywhere."
-  (taoline--set-modeline-format-globally nil 'backup))
+  "Hide the classic mode-line in all existing and future buffers.
+
+The current value of `mode-line-format` is stored in the buffer-local
+variable `taoline--saved-mode-line-format` so that it can be restored
+verbatim when `taoline-mode` is turned off."
+  ;; Save the global default (only once) and blank it so *new* buffers
+  ;; inherit the hidden state.
+  (unless taoline--default-mode-line-format-backup
+    (setq taoline--default-mode-line-format-backup
+          (default-value 'mode-line-format)))
+  (setq-default mode-line-format nil)
+  ;; Hide mode-line in all currently existing buffers while remembering
+  ;; their individual value.
+  (dolist (buf (buffer-list))
+    (with-current-buffer buf
+      (unless (local-variable-p 'taoline--saved-mode-line-format)
+        (setq-local taoline--saved-mode-line-format mode-line-format))
+      (setq-local mode-line-format nil)))
+  (force-mode-line-update t))
 
 (defun taoline--unhide-modeline-globally ()
-  "Restore previously hidden mode-lines."
-  (taoline--set-modeline-format-globally :default 'restore))
+  "Restore the classic mode-line in every buffer.
+
+The value saved in `taoline--saved-mode-line-format` is put back and the
+helper variable is cleaned up."
+  ;; Restore global default.
+  (when taoline--default-mode-line-format-backup
+    (setq-default mode-line-format taoline--default-mode-line-format-backup)
+    (setq taoline--default-mode-line-format-backup nil))
+  ;; Restore per-buffer values.
+  (dolist (buf (buffer-list))
+    (with-current-buffer buf
+      (when (local-variable-p 'taoline--saved-mode-line-format)
+        (setq-local mode-line-format taoline--saved-mode-line-format)
+        (kill-local-variable 'taoline--saved-mode-line-format))))
+  (force-mode-line-update t))
 
 ;; ----------------------------------------------------------------------------
 ;; Segment definition macros
@@ -233,26 +266,26 @@ If BACKUP-RESTORE is non-nil, take/restore backup of default."
 ;; Core: compose function (pure)
 
 (defun taoline-compose-modeline (&optional buffer window width)
-  "Собрать строку taoline, гарантированно укладывающуюся в ширину WIDTH.
-Функция чистая: она лишь возвращает строку, не вызывая побочных эффектов."
+  "Compose a Taoline string that is guaranteed to fit within WIDTH.
+This function is pure: it merely returns the string and causes no side effects."
   (let* ((window (or (and (windowp window) window)
                      (selected-window)))
          (buffer (or buffer (window-buffer window)))
-         ;; Доступная ширина (display columns) мини-буфера / кадра
+         ;; Available width (display columns) of the minibuffer / frame
          (width  (or width
                      (let* ((mini (minibuffer-window))
                             (mini-width (and (window-live-p mini)
                                              (window-width mini))))
                        (or mini-width (frame-width)))))
          ;; ------------------------------------------------------------------
-         ;; Сегменты
+         ;; Segments
          (left   (mapconcat #'identity (taoline--collect-segments :left buffer) " "))
          (right  (mapconcat #'identity (taoline--collect-segments :right buffer) " "))
          (center (mapconcat #'identity (taoline--collect-segments :center buffer) " "))
-         ;; Ширины сегментов
+         ;; Segment widths
          (left-w   (string-width left))
          (right-w  (string-width right))
-         ;; Разделительные пробелы вставляются ТОЛЬКО при необходимости
+         ;; Insert separator spaces ONLY when needed
          (space-left  (if (and (not (string-empty-p left))
                                (or (not (string-empty-p center))
                                    (not (string-empty-p right))))
@@ -260,24 +293,23 @@ If BACKUP-RESTORE is non-nil, take/restore backup of default."
          (space-right (if (and (not (string-empty-p right))
                                (not (string-empty-p center)))
                           " " ""))
-         ;; Сколько колонок остаётся под центральную часть (центр + пэддинг)
+         ;; How many columns remain for the central part (center + padding)
          (available (- width
                        left-w
                        right-w
                        (string-width space-left)
                        (string-width space-right)
                        taoline-right-padding))
-         ;; Центральная строка обрезается по `available`
+         ;; Center string is truncated to `available`
          (center-str (truncate-string-to-width center (max 0 available) 0 ?\s))
          (center-w  (string-width center-str))
-         ;; Оставшееся место равномерно делится на левый/правый пэддинг
+         ;; The remaining space is divided evenly into left/right padding
          (pad-total   (max 0 (- available center-w)))
          (pad-left-w  (/ pad-total 2))
          (pad-right-w (- pad-total pad-left-w))
          (pad-left  (make-string pad-left-w ?\s))
          (pad-right (make-string pad-right-w ?\s)))
-    ;; ------------------------------------------------------------------
-    ;; Итоговая строка, теперь фейсы применяются только в сегментах!
+
     (let ((final (concat
                   left
                   space-left
@@ -384,11 +416,9 @@ The timer will not run more often than this interval."
       (setq taoline--resize-mini-windows-backup nil))))
 
 ;; ----------------------------------------------------------------------------
-;; ---------------------------------------------------------------------------
-;; Default segments (примерные реализации)
+;; Segments
 ;; ---------------------------------------------------------------------------
 
-;; Универсальная функция, как во вкладках: сначала icon-for-file, потом icon-for-mode, затем fallback.
 (defun taoline--get-buffer-icon (&optional buffer)
   "Return a suitable icon string for BUFFER using all-the-icons, universal and concise."
   (let* ((default-icon (propertize "●" 'face 'taoline-base-face))
@@ -398,17 +428,17 @@ The timer will not run more often than this interval."
         (with-current-buffer buf
           (let* ((file (buffer-file-name buf)))
             (or
-             ;; Если файл есть — по файлу
+             ;; If there is a file — by file type
              (when file
                (let ((ic (all-the-icons-icon-for-file
                           (file-name-nondirectory file)
                           :height 1.0 :v-adjust 0 :face 'taoline-base-face)))
                  (when (and (stringp ic) (> (string-width ic) 0)) ic)))
-             ;; По major-mode (универсально, работает для большинства случаев)
+             ;; By major-mode (universal, works for most cases)
              (let ((ic (all-the-icons-icon-for-mode
                         major-mode :height 1.0 :v-adjust 0 :face 'taoline-base-face)))
                (when (and (stringp ic) (> (string-width ic) 0)) ic))
-             ;; Фолбек
+             ;; Fallback
              default-icon)))))))
 
 (defconst taoline--icon-width 3
@@ -429,7 +459,7 @@ You may need to adapt this for your font & setup.")
      name
      (or mod ""))))
 
-;; Имя проекта (например, Projectile)
+;; Project name (for example, Projectile)
 (taoline-define-simple-segment taoline-segment-project-name
   "Project name, if available."
   (let* ((project
@@ -443,7 +473,7 @@ You may need to adapt this for your font & setup.")
     (when (and project (not (string= "-" project)))
       (propertize project 'face 'taoline-project-face))))
 
-;; Git-ветка (projectile / vc-git)
+;; Git branch (projectile / vc-git)
 (taoline-define-simple-segment taoline-segment-git-branch
   "Current Git branch."
   (when (and (featurep 'vc-git) (buffer-file-name))
@@ -454,7 +484,7 @@ You may need to adapt this for your font & setup.")
          " "
          (propertize branch 'face 'taoline-git-face))))))
 
-;; Имя проекта (projectile)
+;; Project name (projectile)
 (taoline-define-simple-segment taoline-segment-project-name
   "Project name via projectile."
   (when (and (featurep 'projectile) (projectile-project-p))
@@ -463,12 +493,12 @@ You may need to adapt this for your font & setup.")
      " "
      (projectile-project-name))))
 
-;; Сообщение из echo-area (для демонстрации – текущее `current-message`)
+;; Echo-area message segment (for demonstration – shows `current-message`)
 (taoline-define-simple-segment taoline-segment-echo-message
   "Current echo message excluding taoline itself, padded to fixed width to prevent jumping."
   (let* ((msg  (current-message))
-         (max-width 32) ;; Измените при необходимости
-         ;; Показываем сообщение только если это не последняя строка taoline
+         (max-width 32) ;; Adjust if needed
+         ;; Show the message only if it's not the last taoline string
          (show (unless (or (null msg)
                            (string-equal msg taoline--last-str))
                  msg))
@@ -480,7 +510,7 @@ You may need to adapt this for your font & setup.")
            max-width)))
     (propertize padded-str 'face 'taoline-echo-face)))
 
-;; Сегмент батареи (если доступна `battery`)
+;; Battery segment (if `battery` is available)
 (taoline-define-simple-segment taoline-segment-battery
   "Battery status with icon."
   (when (and (fboundp 'battery) battery-status-function)
@@ -524,8 +554,7 @@ You may need to adapt this for your font & setup.")
       (format-mode-line mode-name)
       'face 'taoline-mode-face))))
 
-
-;; Время
+;; Time segment
 (taoline-define-simple-segment taoline-segment-time
   "Current time."
   (propertize (format-time-string "%H:%M") 'face 'taoline-time-face))
