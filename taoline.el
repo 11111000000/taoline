@@ -107,7 +107,7 @@ Each value is a list of segment function symbols."
   :group 'taoline)
 
 (defface taoline-echo-face
-  '((t :inherit (font-lock-comment-face taoline-base-face) :height 0.8))
+  '((t :inherit (font-lock-comment-face taoline-base-face) :height 1.0))
   "Face for echo message segment (slightly smaller)."
   :group 'taoline)
 
@@ -263,6 +263,43 @@ helper variable is cleaned up."
            collect str))
 
 ;; ----------------------------------------------------------------------------
+;; Core: available center width (pure)
+
+(defun taoline-available-center-width (&optional buffer window width)
+  "Return the maximum possible width for the center segment (excluding right-padding).
+Takes into account current left and right segments, including needed separator spaces."
+  (let* ((window (or (and (windowp window) window)
+                     (selected-window)))
+         (buffer (or buffer (window-buffer window)))
+         (width  (or width
+                     (let* ((mini (minibuffer-window))
+                            (mini-width (and (window-live-p mini)
+                                             (window-width mini))))
+                       (or mini-width (frame-width)))))
+         (left   (mapconcat #'identity (taoline--collect-segments :left buffer) " "))
+         (right  (mapconcat #'identity (taoline--collect-segments :right buffer) " "))
+         (left-w (string-width left))
+         (right-w (string-width right))
+         (space-left  (if (and (not (string-empty-p left))
+                               (not (string-empty-p right)))
+                          1 0))
+         ;; If center segment is empty, no space needed before or after
+         ;; If both exist, at least one space before center
+         (space-center-left (if (and (not (string-empty-p left))
+                                     ;; center will be inserted anyway, always leave space
+                                     )
+                                1 0))
+         (space-center-right (if (and (not (string-empty-p right)))
+                                 1 0)))
+    (max 0 (- width
+              left-w
+              right-w
+              ;; NB! We only leave spaces where segments exist
+              (if (not (string-empty-p left)) 1 0)
+              (if (not (string-empty-p right)) 1 0)
+              taoline-right-padding))))
+
+;; ----------------------------------------------------------------------------
 ;; Core: compose function (pure)
 
 (defun taoline-compose-modeline (&optional buffer window width)
@@ -271,51 +308,39 @@ This function is pure: it merely returns the string and causes no side effects."
   (let* ((window (or (and (windowp window) window)
                      (selected-window)))
          (buffer (or buffer (window-buffer window)))
-         ;; Available width (display columns) of the minibuffer / frame
          (width  (or width
                      (let* ((mini (minibuffer-window))
                             (mini-width (and (window-live-p mini)
                                              (window-width mini))))
                        (or mini-width (frame-width)))))
-         ;; ------------------------------------------------------------------
-         ;; Segments
          (left   (mapconcat #'identity (taoline--collect-segments :left buffer) " "))
          (right  (mapconcat #'identity (taoline--collect-segments :right buffer) " "))
          (center (mapconcat #'identity (taoline--collect-segments :center buffer) " "))
-         ;; Segment widths
-         (left-w   (string-width left))
-         (right-w  (string-width right))
+         (left-w (string-width left))
+         (right-w (string-width right))
          ;; Insert separator spaces ONLY when needed
-         (space-left  (if (and (not (string-empty-p left))
-                               (or (not (string-empty-p center))
-                                   (not (string-empty-p right))))
-                          " " ""))
-         (space-right (if (and (not (string-empty-p right))
-                               (not (string-empty-p center)))
-                          " " ""))
-         ;; How many columns remain for the central part (center + padding)
-         (available (- width
-                       left-w
-                       right-w
-                       (string-width space-left)
-                       (string-width space-right)
-                       taoline-right-padding))
-         ;; Center string is truncated to `available`
-         (center-str (truncate-string-to-width center (max 0 available) 0 ?\s))
-         (center-w  (string-width center-str))
-         ;; The remaining space is divided evenly into left/right padding
-         (pad-total   (max 0 (- available center-w)))
-         (pad-left-w  (/ pad-total 2))
-         (pad-right-w (- pad-total pad-left-w))
-         (pad-left  (make-string pad-left-w ?\s))
-         (pad-right (make-string pad-right-w ?\s)))
-
+         (space-left (if (and (not (string-empty-p left))
+                              (not (string-empty-p center)))
+                         "" (if (not (string-empty-p left)) " " "")))
+         (space-right (if (not (string-empty-p right)) " " ""))
+         ;; The maximum room for center segment
+         (available
+          (max 0 (- width
+                    left-w
+                    right-w
+                    (string-width space-left)
+                    (string-width space-right)
+                    taoline-right-padding)))
+         ;; Строка-центр растягивается НА ВСЮ доступную ширину,
+         ;; с обрезанием только если не помещается.
+         (center-str
+          (if (> (string-width center) available)
+              (truncate-string-to-width center available 0 ?\s)
+            (concat center (make-string (- available (string-width center)) ?\s)))))
     (let ((final (concat
                   left
                   space-left
-                  pad-left
                   center-str
-                  pad-right
                   space-right
                   right
                   (make-string taoline-right-padding ?\s))))
@@ -495,19 +520,19 @@ You may need to adapt this for your font & setup.")
 
 ;; Echo-area message segment (for demonstration – shows `current-message`)
 (taoline-define-simple-segment taoline-segment-echo-message
-  "Current echo message excluding taoline itself, padded to fixed width to prevent jumping."
+  "Current echo message excluding taoline itself, растянутый на всю ширину между левым и правым сегментами."
   (let* ((msg  (current-message))
-         (max-width 32) ;; Adjust if needed
+         (max-width (taoline-available-center-width)) ;; автоширина!
          ;; Show the message only if it's not the last taoline string
          (show (unless (or (null msg)
                            (string-equal msg taoline--last-str))
                  msg))
          (shown-str (or show ""))
          (padded-str
-          (truncate-string-to-width
-           (concat shown-str
-                   (make-string max-width ?\s))
-           max-width)))
+          ;; Растягиваем, если надо — дополнительно пробелы вправо!
+          (if (>= (string-width shown-str) max-width)
+              (truncate-string-to-width shown-str max-width 0 ?\s)
+            (concat shown-str (make-string (- max-width (string-width shown-str)) ?\s)))))
     (propertize padded-str 'face 'taoline-echo-face)))
 
 ;; Battery segment (if `battery` is available)
