@@ -1,18 +1,18 @@
 - Taoline: The Lightest Line — Functional Minimalism for Emacs
 
-In true equilibrium, nothing superfluous is required — and Taoline manifests but that which truly occupies thy attention in the present moment. This modeline flits into the echo area only when it has aught to impart, then vanishes without trace, as a silent brook flowing by.
+In perfect equilibrium, nothing superfluous is required; Taoline therefore presents only what truly merits your attention in the present moment. The modeline appears in the echo area only when it has something to say, then slips away without a trace, like a silent brook.
 
-* What doth Taoline?
+* What Does Taoline Do?
 
-- Sheweth only what is needful — in the very moment and at the foot of the window (echo area).
-- Her architecture resteth upon pure functions: each segment doth commune with the buffer, disturbing not the global state.
-- Simplicity is esteemed above all: segments may be added, transposed, or omitted with the lightest touch.
-- Her configuration is intuitive — transparent unto any who cast their gaze upon Emacs for the first occasion.
-- Bereft of timers: renewal occurreth gently, solely upon morrowings of thine own action.
+- Displays only what is necessary—at the precise moment and at the foot of the window (the echo area).
+- Its architecture is built upon pure functions: each segment communicates solely with the current buffer, leaving global state untouched.
+- Simplicity is held paramount: segments may be added, reordered, or removed with the lightest touch.
+- Configuration is intuitive—clear even to those beholding Emacs for the first time.
+- Free of timers: updates occur gently, only in response to your own actions.
 
-* The Initial Step
+* The First Step
 
-To summon Taoline unto thy presence, proceed thusly:
+To summon Taoline, proceed as follows:
 
 #+BEGIN_SRC emacs-lisp
 (use-package taoline
@@ -21,67 +21,65 @@ To summon Taoline unto thy presence, proceed thusly:
   (taoline-mode 1))
 #+END_SRC
 
-To enable Taoline:
+To enable Taoline directly:
 
 #+BEGIN_SRC emacs-lisp
 (taoline-mode 1)
 #+END_SRC
 
-* The Art of Personalisation: The Dance of Segments
+* Personalisation: The Dance of Segments
 
-All segments assemble within the list =taoline-segments=. Each is scribed as a pure function (buffer → string):
+All segments assemble in the list `taoline-segments`. Each is a pure function (buffer → string):
 
 #+BEGIN_SRC emacs-lisp
 (setq taoline-segments
-      '((:left taoline-segment-icon-and-buffer taoline-segment-git-branch)
+      '((:left   taoline-segment-icon-and-buffer taoline-segment-git-branch)
         (:center taoline-segment-echo-message)
-        (:right taoline-segment-project-name taoline-segment-time)))
+        (:right  taoline-segment-project-name   taoline-segment-time)))
 #+END_SRC
 
-To alter the sequence, or to add or remove segments, simply edit this list. The left (:left), central (:center), and right (:right) divisions — amongst them space shall arise as necessity demandeth.
+To alter the order, or to add or remove segments, simply edit this list. The left (`:left`), centre (`:center`), and right (`:right`) divisions will insert space between themselves as required.
 
-* The Meditation on Extension: How To Fashion Thine Own Segment
+* Extending Taoline: Crafting Your Own Segment
 
-Each portion of Taoline is a solitary function, entwined neither with others nor with the wide world. To create a new segment is but the work of a single comma:
+Each portion of Taoline is an independent function, coupled neither to other segments nor to global state. Creating a new segment is as simple as writing one function:
 
 #+BEGIN_SRC emacs-lisp
 (taoline-define-segment taoline-segment-buffer-size (buffer)
-  "Displayeth the magnitude of the buffer."
-  (format "%.1fK" (/ (buffer-size buffer) 1024.0)))
+  "Display the size of the current buffer."
+  (format "%.1f K" (/ (buffer-size buffer) 1024.0)))
 #+END_SRC
 
-Then place it within the chosen quarter:
+Then place it in the desired slot:
 
 #+BEGIN_SRC emacs-lisp
 (push 'taoline-segment-buffer-size (alist-get :right taoline-segments))
 #+END_SRC
 
-* Permit the Echo Area to Flow Peacefully
+* Let the Echo Area Flow Unhindered
 
-Taoline revealeth herself in the echo area only when no other message is present. All matters of weightier import — be it the minibuffer, an isearch, or thine own dispatches — possess priority. The customary modeline is obscured (shouldst thou so desire — this behaviour is optional).
+Taoline reveals itself in the echo area only when no other message is present. All matters of greater import—such as the minibuffer, an incremental search, or your own messages—take precedence. The traditional modeline can be hidden (this behaviour is optional).
 
-* Frequent Inquiries
+* Frequently Asked Questions
 
-- /Wherefore is my mode-line vanished?/  
-  It hath absented itself in homage to the Void. It shall reappear when =taoline-mode= is disabled.
+- /Where has my modeline gone?/  
+  It has withdrawn in homage to the Void. It will return when `taoline-mode` is disabled.
 
-- /Wherefore doth the message of Taoline at times vanish suddenly?/  
-  When Emacs is otherwise engaged — emitting its own notifications or contending with the minibuffer — Taoline courteously yieldeth precedence.
+- /Why does the Taoline message sometimes vanish unexpectedly?/  
+  When Emacs is busy—emitting its own notifications or occupying the minibuffer—Taoline courteously yields the floor.
 
-- /How might I add whatsoever pleases me?/  
-  Simply compose a function (buffer) → string, register it using =taoline-define-segment=, and implant the symbol of this function whither thou wilt in the segments’ list.
+- /How may I add whatever I please?/  
+  Write a function `(buffer) → string`, register it with `taoline-define-segment`, and insert its symbol at the desired position in the segment list.
 
-* Where May the Art of Taoline Be Studied?
+* Where May One Study the Art of Taoline?
 
-Peruse the source, or behold [GitHub](https://github.com/11111000000/taoline) — there all is plain and possessed of utmost clarity. Logs of her proceedings (shouldst thou require them) reside in the buffer =*taoline-logs*=.
+Peruse the source code or visit [GitHub](https://github.com/11111000000/taoline); all is plain and uncommonly clear. Logs of Taoline’s activity (should you require them) reside in the buffer `*taoline-logs*`.
 
-* A Glimpse of Taoline at Work
+* A Glimpse of Taoline in Action
 
 #+ATTR_ORG: :width 80%
 [[file:screenshot-taoline.png]]
 
 ---
 
-The empty tract upon the line — is the domain of tranquillity.
-
-*** 
+The empty stretch upon the line is a domain of tranquillity.
