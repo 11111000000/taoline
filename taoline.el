@@ -409,7 +409,7 @@ The timer will not run more often than this interval."
                         major-mode :height 1.0 :v-adjust 0 :face 'taoline-base-face)))
                (when (and (stringp ic) (> (string-width ic) 0)) ic))
              ;; Фолбек
-             default-icon))))))
+             default-icon)))))))
 
 (defconst taoline--icon-width 3
   "Fixed icon width (in display columns) for taoline buffer icons.
