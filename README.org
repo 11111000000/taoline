@@ -40,7 +40,7 @@ All segments assemble within the list =taoline-segments=. Each is scribed as a p
 
 To alter the sequence, or to add or remove segments, simply edit this list. The left (:left), central (:center), and right (:right) divisions — amongst them space shall arise as necessity demandeth.
 
-* The Meditative Extension: How To Fashion Thine Own Segment
+* The Meditation on Extension: How To Fashion Thine Own Segment
 
 Each portion of Taoline is a solitary function, entwined neither with others nor with the wide world. To create a new segment is but the work of a single comma:
 
