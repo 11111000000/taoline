@@ -401,6 +401,8 @@ You may need to adapt this for your font & setup.")
                    (let ((file (buffer-file-name))
                          (mode (or major-mode 'fundamental-mode)))
                      (cond
+                      ((eq mode 'org-mode)
+                       (all-the-icons-fileicon "org" :height 1.0))
                       (file
                        (let ((ic (all-the-icons-icon-for-file
                                   (file-name-nondirectory file)
