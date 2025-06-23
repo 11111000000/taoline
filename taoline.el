@@ -68,9 +68,9 @@
         (insert msg "\n")))))
 
 (defcustom taoline-segments
-  '((:left taoline-segment-project-name taoline-segment-git-branch taoline-segment-icon-and-buffer)
+  '((:left taoline-segment-icon-and-buffer taoline-segment-git-branch)
     (:center taoline-segment-echo-message)
-    (:right taoline-segment-battery taoline-segment-time))
+    (:right taoline-segment-project-name taoline-segment-battery taoline-segment-time))
   "Alist describing segments for :left, :center и :right.
 Каждое значение – список *символов-функций* сегмента."
   :type '(alist :key-type symbol :value-type (repeat function))
@@ -87,7 +87,7 @@
   :type 'boolean
   :group 'taoline)
 
-(defcustom taoline-right-padding 15
+(defcustom taoline-right-padding 0
   "Spaces appended to the rightmost edge of taoline."
   :type 'integer
   :group 'taoline)
@@ -96,7 +96,7 @@
 ;; Faces
 
 (defface taoline-base-face
-  '((t :inherit mode-line
+  '((t :inherit default
        :height 1.0
        :box nil
        :underline nil
@@ -107,18 +107,28 @@
   :group 'taoline)
 
 (defface taoline-echo-face
-  '((t :inherit (shadow taoline-base-face) :height 1.0))
-  "Face for echo message segment."
+  '((t :inherit (font-lock-comment-face taoline-base-face) :height 0.8))
+  "Face for echo message segment (slightly smaller)."
   :group 'taoline)
 
 (defface taoline-time-face
-  '((t :inherit (success taoline-base-face) :height 1.0))
+  '((t :background "#002200" :foreground "#00aa00" :height 1.0 :bold nil :family "Digital Display"))
+  "Face for time segment."
+  :group 'taoline)
+
+(defface taoline-battery-face
+  '((t :inherit (success taoline-base-face) :height 0.8))
   "Face for time segment."
   :group 'taoline)
 
 (defface taoline-buffer-face
-  '((t :inherit (mode-line-buffer-id taoline-base-face) :height 1.0))
+  '((t :inherit (taoline-base-face) :height 1.0))
   "Face for buffer name segment."
+  :group 'taoline)
+
+(defface taoline-project-face
+  '((t :inherit (font-lock-keyword-face taoline-base-face) :height 1.0))
+  "Face for project name segment."
   :group 'taoline)
 
 (defface taoline-modified-face
@@ -127,7 +137,7 @@
   :group 'taoline)
 
 (defface taoline-git-face
-  '((t :inherit (font-lock-keyword-face taoline-base-face) :height 1.0))
+  '((t :inherit (font-lock-type-face taoline-base-face) :height 1.0))
   "Face for git branch segment."
   :group 'taoline)
 
@@ -267,15 +277,15 @@ If BACKUP-RESTORE is non-nil, take/restore backup of default."
          (pad-left  (make-string pad-left-w ?\s))
          (pad-right (make-string pad-right-w ?\s)))
     ;; ------------------------------------------------------------------
-    ;; Итоговая строка
+    ;; Итоговая строка, теперь фейсы применяются только в сегментах!
     (let ((final (concat
-                  (propertize left 'face 'taoline-base-face)
+                  left
                   space-left
                   pad-left
-                  (propertize center-str 'face 'taoline-base-face)
+                  center-str
                   pad-right
                   space-right
-                  (propertize right 'face 'taoline-base-face)
+                  right
                   (make-string taoline-right-padding ?\s))))
       ;; ensure we never exceed the echo-area width
       (truncate-string-to-width final width 0 ?\s))))
@@ -379,24 +389,56 @@ The timer will not run more often than this interval."
 ;; ---------------------------------------------------------------------------
 
 ;; Имя буфера + ‘*’ если modified
+(defconst taoline--icon-width 3
+  "Fixed icon width (in display columns) for taoline buffer icons.
+You may need to adapt this for your font & setup.")
+
 (taoline-define-simple-segment taoline-segment-icon-and-buffer
-  "Buffer name with optional icon and modified flag."
-  (let* ((icon (when (featurep 'all-the-icons)
-                 (if (buffer-file-name)
-                     (all-the-icons-icon-for-file
-                      (file-name-nondirectory (buffer-file-name))
-                      :height 1.0 :v-adjust -0.1 :face 'taoline-base-face)
-                   (all-the-icons-icon-for-mode
-                    major-mode
-                    :height 1.0 :v-adjust -0.1 :face 'taoline-base-face))))
+  "Buffer name with optional icon and modified flag, robust to unknown/unsupported major-modes."
+  (let* ((default-icon (propertize "●" 'face 'taoline-base-face)) ;; choose what you like ("•" "○" etc)
+         (icon (when (featurep 'all-the-icons)
+                 (ignore-errors
+                   (let ((file (buffer-file-name))
+                         (mode (or major-mode 'fundamental-mode)))
+                     (cond
+                      (file
+                       (let ((ic (all-the-icons-icon-for-file
+                                  (file-name-nondirectory file)
+                                  :height 1.0 :v-adjust 0 :face 'taoline-base-face)))
+                         (if (and (stringp ic) (> (length ic) 0))
+                             ic
+                           default-icon)))
+                      (t
+                       (let ((ic (all-the-icons-icon-for-mode
+                                  mode :height 1.0 :v-adjust 0 :face 'taoline-base-face)))
+                         (if (and (stringp ic) (> (length ic) 0))
+                             ic
+                           default-icon))))))))
+         (disp-icon (or icon default-icon))
+         (icon-str (let* ((w (string-width disp-icon))
+                          (pad (max 0 (- taoline--icon-width w))))
+                     (concat disp-icon (make-string pad ?\s))))
          (name (propertize (buffer-name) 'face 'taoline-buffer-face))
          (mod  (when (buffer-modified-p)
                  (propertize " *" 'face 'taoline-modified-face))))
     (concat
-     (or icon "")
-     " "
+     icon-str
      name
      (or mod ""))))
+
+;; Имя проекта (например, Projectile)
+(taoline-define-simple-segment taoline-segment-project-name
+  "Project name, if available."
+  (let* ((project
+          (cond
+           ((and (featurep 'projectile) (projectile-project-name))
+            (projectile-project-name))
+           ((fboundp 'project-current)
+            (when-let ((pr (project-current)))
+              (file-name-nondirectory (directory-file-name (car (project-roots pr))))))
+           (t nil))))
+    (when (and project (not (string= "-" project)))
+      (propertize project 'face 'taoline-project-face))))
 
 ;; Git-ветка (projectile / vc-git)
 (taoline-define-simple-segment taoline-segment-git-branch
@@ -405,7 +447,7 @@ The timer will not run more often than this interval."
     (let ((branch (vc-git--symbolic-ref (buffer-file-name))))
       (when branch
         (concat
-         (all-the-icons-octicon "git-branch" :v-adjust -0.1 :height 1.0 :face 'taoline-git-face)
+         (all-the-icons-octicon "git-branch" :v-adjust 0 :height 1.0 :face 'taoline-git-face)
          " "
          (propertize branch 'face 'taoline-git-face))))))
 
@@ -414,26 +456,57 @@ The timer will not run more often than this interval."
   "Project name via projectile."
   (when (and (featurep 'projectile) (projectile-project-p))
     (concat
-     (all-the-icons-octicon "briefcase" :v-adjust -0.1 :height 1.0 :face 'taoline-base-face)
+     (all-the-icons-faicon "folder-o" :v-adjust 0 :height 1.0 :face 'taoline-base-face)
      " "
      (projectile-project-name))))
 
 ;; Сообщение из echo-area (для демонстрации – текущее `current-message`)
 (taoline-define-simple-segment taoline-segment-echo-message
-  "Current echo message excluding taoline itself."
+  "Current echo message excluding taoline itself, padded to fixed width to prevent jumping."
   (let* ((msg  (current-message))
+         (max-width 32) ;; Измените при необходимости
+         ;; Показываем сообщение только если это не последняя строка taoline
          (show (unless (or (null msg)
                            (string-equal msg taoline--last-str))
-                 msg)))
-    (propertize (or show "") 'face 'taoline-echo-face)))
+                 msg))
+         (shown-str (or show ""))
+         (padded-str
+          (truncate-string-to-width
+           (concat shown-str
+                   (make-string max-width ?\s))
+           max-width)))
+    (propertize padded-str 'face 'taoline-echo-face)))
 
 ;; Сегмент батареи (если доступна `battery`)
 (taoline-define-simple-segment taoline-segment-battery
-  "Battery status."
+  "Battery status with icon."
   (when (and (fboundp 'battery) battery-status-function)
-    (let ((data (and battery-status-function (funcall battery-status-function))))
-      (when data
-        (propertize (cdr (assoc ?p data)) 'face 'taoline-echo-face)))))
+    (let* ((data (and battery-status-function (funcall battery-status-function)))
+           (percent (cdr (assoc ?p data)))
+           (status  (cdr (assoc ?B data))) ;; charging, discharging, etc.
+           (icon
+            (cond
+             ((not (featurep 'all-the-icons)) "")
+             ((and status (string-match-p "AC" status))
+              (all-the-icons-octicon "plug" :face 'taoline-battery-face :height 1.0 :v-adjust 0))
+             ((and status (string-match-p "Charging" status))
+              (all-the-icons-faicon "bolt" :face 'taoline-battery-face :height 1.0 :v-adjust 0))
+             ((and percent (string-match "\\([0-9]+\\)" percent))
+              (let* ((n (string-to-number (match-string 1 percent))))
+                (cond
+                 ((>= n 95) (all-the-icons-faicon "battery-full" :face 'taoline-battery-face :height 1.0 :v-adjust 0))
+                 ((>= n 75) (all-the-icons-faicon "battery-three-quarters" :face 'taoline-battery-face :height 1.0 :v-adjust -0.1))
+                 ((>= n 50) (all-the-icons-faicon "battery-half" :face 'taoline-battery-face :height 1.0 :v-adjust 0))
+                 ((>= n 25) (all-the-icons-faicon "battery-quarter" :face 'taoline-battery-face :height 1.0 :v-adjust 0))
+                 (t (all-the-icons-faicon "battery-empty" :face 'taoline-battery-face :height 1.0 :v-adjust 0)))))
+             (t ""))))
+      (when percent
+        (concat
+         (when (and (stringp icon) (not (string-empty-p icon)))
+           (concat icon " "))
+         (propertize
+          (concat (replace-regexp-in-string "%" "" percent) "%")
+          'face 'taoline-battery-face))))))
 
 ;; Major-mode
 (taoline-define-simple-segment taoline-segment-major-mode
