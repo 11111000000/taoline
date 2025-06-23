@@ -491,45 +491,39 @@ pending timer (if any) will handle that."
 ;; Segments
 ;; ---------------------------------------------------------------------------
 
-(defun taoline--get-buffer-icon (&optional buffer)
-  "Return a suitable icon string for BUFFER using all-the-icons, universal and concise."
-  (let* ((default-icon (propertize "●" 'face 'taoline-base-face))
-         (buf (or buffer (current-buffer))))
-    (when (featurep 'all-the-icons)
-      (ignore-errors
-        (with-current-buffer buf
-          (let* ((file (buffer-file-name buf)))
-            (or
-             ;; If there is a file — by file type
-             (when file
-               (let ((ic (all-the-icons-icon-for-file
-                          (file-name-nondirectory file)
-                          :height 1.0 :v-adjust 0 :face 'taoline-base-face)))
-                 (when (and (stringp ic) (> (string-width ic) 0)) ic)))
-             ;; By major-mode (universal, works for most cases)
-             (let ((ic (all-the-icons-icon-for-mode
-                        major-mode :height 1.0 :v-adjust 0 :face 'taoline-base-face)))
-               (when (and (stringp ic) (> (string-width ic) 0)) ic))
-             ;; Fallback
-             default-icon)))))))
+(defun taoline--get-buffer-icon (buffer)
+  "Return a buffer icon, possibly using `all-the-icons'.
+Chooses color/iconation similar to tabs: prefers icon-for-mode (colored), else
+icon-for-file, else default faicon."
+  (when (require 'all-the-icons nil t)
+    (let* ((mode (buffer-local-value 'major-mode buffer))
+           (raw-icon (all-the-icons-icon-for-mode mode :height 0.9))
+           (icon
+            (cond
+             ((stringp raw-icon) raw-icon)
+             ((buffer-file-name buffer)
+              (all-the-icons-icon-for-file
+               (buffer-file-name buffer) :height 0.9))
+             (t
+              (all-the-icons-faicon "file-o" :height 0.9)))))
+      icon)))
 
 (defconst taoline--icon-width 3
   "Fixed icon width (in display columns) for taoline buffer icons.
 You may need to adapt this for your font & setup.")
 
-(taoline-define-simple-segment taoline-segment-icon-and-buffer
-  "Buffer name with universal icon selection and modified flag."
-  (let* ((icon (or (taoline--get-buffer-icon) (propertize "●" 'face 'taoline-base-face)))
-         (icon-str (let* ((w (string-width icon))
-                          (pad (max 0 (- taoline--icon-width w))))
-                     (concat icon (make-string pad ?\s))))
-         (name (propertize (buffer-name) 'face 'taoline-buffer-face))
-         (mod  (when (buffer-modified-p)
-                 (propertize " *" 'face 'taoline-modified-face))))
-    (concat
-     icon-str
-     name
-     (or mod ""))))
+(taoline-define-segment taoline-segment-icon-and-buffer (buffer)
+  "Цветная иконка буфера (по режиму, как во вкладках) + имя буфера.
+➤ Например:  README.org — иконка будет цветной и соответствовать файлу/режиму."
+  (let* ((icon (taoline--get-buffer-icon buffer)) ;; Теперь — цветная иконка, та же логика.
+         (name (buffer-name buffer))
+         (text (if icon (concat icon " " name) name)))
+    ;; Face только к имени (иконка останется цветной/оформленной, не затрагивается face).
+    (add-face-text-property
+     (if icon (length icon) 0) (length text)
+     'taoline-buffer-face 'append
+     text)
+    text))
 
 ;; Project name (for example, Projectile)
 (taoline-define-simple-segment taoline-segment-project-name
