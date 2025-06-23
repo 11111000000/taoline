@@ -388,40 +388,28 @@ The timer will not run more often than this interval."
 ;; Default segments (примерные реализации)
 ;; ---------------------------------------------------------------------------
 
-;; Универсальный alist для кастомных режимов — легко расширять!
-(defconst taoline-icon-alist
-  '((org-mode         . (all-the-icons-fileicon "org" :height 1.0))
-    (emacs-lisp-mode  . (all-the-icons-fileicon "elisp" :height 1.0))
-    (dired-mode       . (all-the-icons-octicon "file-directory" :height 1.0))
-    (help-mode        . (all-the-icons-octicon "question" :height 1.0)))
-  "Alist mapping major-modes to custom all-the-icons calls for taoline.")
-
+;; Универсальная функция, как во вкладках: сначала icon-for-file, потом icon-for-mode, затем fallback.
 (defun taoline--get-buffer-icon (&optional buffer)
-  "Return a suitable icon string for BUFFER using all-the-icons, with fallback."
+  "Return a suitable icon string for BUFFER using all-the-icons, universal and concise."
   (let* ((default-icon (propertize "●" 'face 'taoline-base-face))
          (buf (or buffer (current-buffer))))
     (when (featurep 'all-the-icons)
       (ignore-errors
         (with-current-buffer buf
-          (let* ((file (buffer-file-name buf))
-                 (mode major-mode))
+          (let* ((file (buffer-file-name buf)))
             (or
-             ;; Пользовательская иконка для конкретного major-mode
-             (let ((entry (assoc mode taoline-icon-alist)))
-               (when entry
-                 (apply (car (cdr entry)) (cddr entry))))
-             ;; File icon, если файл есть и поддержан
+             ;; Если файл есть — по файлу
              (when file
                (let ((ic (all-the-icons-icon-for-file
                           (file-name-nondirectory file)
                           :height 1.0 :v-adjust 0 :face 'taoline-base-face)))
-                 (when (and (stringp ic) (> (length ic) 0)) ic)))
-             ;; По major-mode, если есть встроенная поддержка
+                 (when (and (stringp ic) (> (string-width ic) 0)) ic)))
+             ;; По major-mode (универсально, работает для большинства случаев)
              (let ((ic (all-the-icons-icon-for-mode
-                        mode :height 1.0 :v-adjust 0 :face 'taoline-base-face)))
-               (when (and (stringp ic) (> (length ic) 0)) ic))
+                        major-mode :height 1.0 :v-adjust 0 :face 'taoline-base-face)))
+               (when (and (stringp ic) (> (string-width ic) 0)) ic))
              ;; Фолбек
-             default-icon)))))))
+             default-icon))))))
 
 (defconst taoline--icon-width 3
   "Fixed icon width (in display columns) for taoline buffer icons.
