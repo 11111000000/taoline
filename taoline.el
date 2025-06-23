@@ -87,7 +87,7 @@ Each value is a list of segment function symbols."
   :type 'boolean
   :group 'taoline)
 
-(defcustom taoline-right-padding 6
+(defcustom taoline-right-padding 13
   "Spaces appended to the rightmost edge of taoline."
   :type 'integer
   :group 'taoline)
@@ -376,12 +376,6 @@ Skips update (and clears) during isearch or minibuffer input."
     (message nil))
   (setq taoline--last-str ""))
 
-(defun taoline--message-filter-return (result &rest args)
-  "Filter return of `message'. If RESULT is empty and `taoline-mode' active, redisplay taoline."
-  (when (and taoline-mode (string-empty-p (or result "")))
-    (taoline--update))
-  result)
-
 ;; ----------------------------------------------------------------------------
 ;; Minor mode
 
@@ -390,6 +384,59 @@ Skips update (and clears) during isearch or minibuffer input."
 The timer will not run more often than this interval."
   :type 'number
   :group 'taoline)
+
+;; --------------------------------------------------------------------------
+;;  NEW message-timeout logic (config, timer & helpers)
+
+(defcustom taoline-message-timeout 10
+  "Seconds to keep a regular `message' in the echo area before Taoline
+re-draws its modeline.  A value of 0 disables the timeout (Taoline will
+stay hidden until some other update is triggered)."
+  :type 'number
+  :group 'taoline)
+
+(defvar taoline--redisplay-timer nil
+  "Idle timer started after an ordinary `message'; forces a Taoline
+refresh once `taoline-message-timeout' seconds elapsed.")
+
+(defun taoline--cancel-redisplay-timer ()
+  "Cancel and clear `taoline--redisplay-timer' if it is active."
+  (when (timerp taoline--redisplay-timer)
+    (cancel-timer taoline--redisplay-timer)
+    (setq taoline--redisplay-timer nil)))
+
+(defun taoline--schedule-redisplay ()
+  "Start (or restart) `taoline--redisplay-timer'."
+  (taoline--cancel-redisplay-timer)
+  (when (and taoline-message-timeout
+             (> taoline-message-timeout 0))
+    (setq taoline--redisplay-timer
+          (run-at-time taoline-message-timeout
+                       nil
+                       #'taoline--update))))
+
+(defun taoline--message-filter-return (result &rest _args)
+  "Make Taoline coexist politely with ordinary `message' output.
+
+When `taoline-mode' is active we keep the user's message in the echo
+area for at least `taoline-message-timeout' seconds.  A non-empty RESULT
+coming from `message' restarts that countdown.  Empty RESULTS neither
+erase the previous text nor force an immediate Taoline redraw – the
+pending timer (if any) will handle that."
+  (when taoline-mode
+    (cond
+     ;; New, non-empty message → (re)start the timer.
+     ((and (stringp result) (not (string-empty-p result)))
+      (taoline--schedule-redisplay))
+     ;; RESULT is empty – if no timer is running, schedule one so that
+     ;; Taoline will eventually return.
+     ((null taoline--redisplay-timer)
+      (taoline--schedule-redisplay))))
+  result)
+  
+
+;;  Ensure the timer is cleaned up whenever the global minor-mode is toggled.
+(add-hook 'taoline-mode-hook #'taoline--cancel-redisplay-timer)
 
 (defvar taoline--timer nil
   "Internal timer used by `taoline-mode' for periodic updates.")
