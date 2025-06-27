@@ -9,23 +9,6 @@ The True Shaoline leaves behind no trace.
 The line appears only at those times when the Eternal Empty Buffer heaves a sigh:  
 is aught worth utterance?
 
-* Table of Contents
-- [[*Quick Start][Quick Start]]
-- [[*Features][Features]]
-- [[*Teachings on Segments][Teachings on Segments]]
-- [[*Variables at a Glance][Variables at a Glance]]
-- [[*Configuration Examples][Configuration Examples]]
-- [[*Creating Custom Segments][Creating Custom Segments]]
-- [[*The Freedom of the Echo Area][The Freedom of the Echo Area]]
-- [[*Troubleshooting][Troubleshooting]]
-- [[*FAQ][FAQ]]
-- [[*Esoteric Knowledge][Esoteric Knowledge]]
-- [[*Comparison][Comparison]]
-- [[*Default Segments][Default Segments]]
-- [[*Related][Related]]
-- [[*Feedback][Feedback]]
-- [[*Illustration][Illustration]]
-
 ** Quick Start
 
 #+BEGIN_SRC emacs-lisp
