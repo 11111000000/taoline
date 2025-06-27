@@ -1,85 +1,152 @@
-- Taoline: The Lightest Line — Functional Minimalism for Emacs
+* Shaoline: The Path of the Line
 
-In perfect equilibrium, nothing superfluous is required; Taoline therefore presents only what truly merits your attention in the present moment. The modeline appears in the echo area only when it has something to say, then slips away without a trace, like a silent brook.
+_"The Dao that can be spoken is not the Eternal Dao.  
+A mode that may be seen is soon in need of reformation."_
 
-* What Does Taoline Do?
-
-- Displays only what is necessary—at the precise moment and at the foot of the window (the echo area).
-- Its architecture is built upon pure functions: each segment communicates solely with the current buffer, leaving global state untouched.
-- Simplicity is held paramount: segments may be added, reordered, or removed with the lightest touch.
-- Configuration is intuitive—clear even to those beholding Emacs for the first time.
-- Free of timers: updates occur gently, only in response to your own actions.
-
-* The First Step
-
-To summon Taoline, proceed as follows:
-
-#+BEGIN_SRC emacs-lisp
-(use-package taoline
-  :ensure t
-  :config
-  (taoline-mode 1))
-#+END_SRC
-
-To enable Taoline directly:
-
-#+BEGIN_SRC emacs-lisp
-(taoline-mode 1)
-#+END_SRC
-
-* Personalisation: The Dance of Segments
-
-All segments assemble in the list `taoline-segments`. Each is a pure function (buffer → string):
-
-#+BEGIN_SRC emacs-lisp
-(setq taoline-segments
-      '((:left   taoline-segment-icon-and-buffer taoline-segment-git-branch)
-        (:center taoline-segment-echo-message)
-        (:right  taoline-segment-project-name   taoline-segment-time)))
-#+END_SRC
-
-To alter the order, or to add or remove segments, simply edit this list. The left (`:left`), centre (`:center`), and right (`:right`) divisions will insert space between themselves as required.
-
-* Extending Taoline: Crafting Your Own Segment
-
-Each portion of Taoline is an independent function, coupled neither to other segments nor to global state. Creating a new segment is as simple as writing one function:
-
-#+BEGIN_SRC emacs-lisp
-(taoline-define-segment taoline-segment-buffer-size (buffer)
-  "Display the size of the current buffer."
-  (format "%.1f K" (/ (buffer-size buffer) 1024.0)))
-#+END_SRC
-
-Then place it in the desired slot:
-
-#+BEGIN_SRC emacs-lisp
-(push 'taoline-segment-buffer-size (alist-get :right taoline-segments))
-#+END_SRC
-
-* Let the Echo Area Flow Unhindered
-
-Taoline reveals itself in the echo area only when no other message is present. All matters of greater import—such as the minibuffer, an incremental search, or your own messages—take precedence. The traditional modeline can be hidden (this behaviour is optional).
-
-* Frequently Asked Questions
-
-- /Where has my modeline gone?/  
-  It has withdrawn in homage to the Void. It will return when `taoline-mode` is disabled.
-
-- /Why does the Taoline message sometimes vanish unexpectedly?/  
-  When Emacs is busy—emitting its own notifications or occupying the minibuffer—Taoline courteously yields the floor.
-
-- /How may I add whatever I please?/  
-  Write a function `(buffer) → string`, register it with `taoline-define-segment`, and insert its symbol at the desired position in the segment list.
-
-* Where May One Study the Art of Taoline?
-
-Peruse the source code or visit [GitHub](https://github.com/11111000000/taoline); all is plain and uncommonly clear. Logs of Taoline’s activity (should you require them) reside in the buffer `*taoline-logs*`.
-
-* A Glimpse of Taoline in Action
-
-#+ATTR_ORG: :width 80%
-[[file:screenshot-taoline.png]]
+When thou openest Emacs and beholdest a line wrought by Shaoline,  
+know: thy gaze hath been too intent.  
+The True Shaoline leaves behind no trace.  
+The line appears only at those times when the Eternal Empty Buffer heaves a sigh:  
+is aught worth utterance?
 
 ---
 
-The empty stretch upon the line is a domain of tranquillity.
+** Wherefore to Delight in Shaoline
+
+- *Minimalism*: The Shaoline line arises only when there is aught to say.
+- *Segments are by nature simple*: Each—forlorn, pure, unfastened by worldly things—disturbs not a neighbour.
+- *Effortless Configuration*: Nothing concealed, all open before thee.
+- *Time doth Flow*: Only as the rain upon the lattice does Shaoline update—stirred by event, never haste.
+- *Transparency and Cheer*: In Shaoline containeth nothing that may not be grasped or altered, provided thy spirit be light.
+- *Simplicity and Candour*: The settings are clear as morning tea sipped in the Valley of Wei.
+
+---
+
+** How to Grasp the Path of Shaoline
+
+Begin, as the ancients commenced:
+
+#+BEGIN_SRC emacs-lisp
+(use-package shaoline
+  :ensure t
+  :config
+  (shaoline-mode 1))
+#+END_SRC
+
+Without *use-package*? Invite truth directly:
+
+#+BEGIN_SRC emacs-lisp
+(shaoline-mode 1)
+#+END_SRC
+
+No child-frame, nor window-modeline—the Shaoline line dances solely within the echo area, untroubled by the tumult of the outer interface.
+
+---
+
+** Teachings on Segments
+
+_"The master divides not the line—  
+each portion stands apart.  
+Yet together they form the path of Shaoline."_
+
+Segments in Shaoline are as monks in silent brotherhood, each close to the Void, yet clinging not to his neighbour:
+
+#+BEGIN_SRC emacs-lisp
+(setq shaoline-segments
+      '((:left shaoline-segment-icon-and-buffer shaoline-segment-git-branch)
+        (:center shaoline-segment-echo-message)
+        (:right shaoline-segment-project-name shaoline-segment-time)))
+#+END_SRC
+
+Arrange them as stones in a garden: remove, replace, or add—freely, unafraid.
+
+---
+
+** How to Forge a Segment and not be Reborn as a Beetle
+
+_"The Way is ever simple: let thy function return a string."_
+
+Softly and simply, fashion a custom segment:
+
+#+BEGIN_SRC emacs-lisp
+(shaoline-define-segment shaoline-segment-buffer-size (buffer)
+  "Displays the buffer size."
+  (format "%.1fK" (/ (buffer-size buffer) 1024.0)))
+#+END_SRC
+
+Join the commonwealth:
+
+#+BEGIN_SRC emacs-lisp
+(push 'shaoline-segment-buffer-size (alist-get :right shaoline-segments))
+#+END_SRC
+
+"The finest configuration is that which remaineth unnoticed."
+
+---
+
+** The Freedom of the Echo Area
+
+_"When the cup runneth over—  
+the master sips tea  
+and troubles not the stream."_
+
+A peculiar wisdom: Shaoline manifesteth itself only if the echo area is void. Any Emacs message taketh precedence—Shaoline yields with humility.
+
+---
+
+** Koans
+
+_"A question is thy teacher."_
+
+- *Where is my mode-line?*  
+  Where Shaoline is not, in Nirvana. Desire it, and it shall return.
+
+- *Shaoline vanishes! Is this enlightenment?*  
+  Shouldst the echo-area be occupied, Shaoline falleth silent.  
+  He waiteth until the void resumes, and only then doth he arise once more.
+
+- *I desire my own segment: what is to be done?*  
+  A function (buffer) → string, registered through shaoline-define-segment—thou art a master already.
+
+---
+
+** The Hidden Scrolls of Shaoline
+
+Enable `shaoline-debug` and the entire journey of lines and errors shall be inscribed in the buffer `*shaoline-logs*`.  
+There may the pilgrim find answers to queries and the traces of imperfect segments.
+
+** Esoteric Knowledge
+
+- `shaoline-segments` – Describeth the structure of the line: leftmost, centre, rightmost.
+- `shaoline-autohide-modeline` – In truth, the mode-line departeth.
+- `shaoline-update-hooks` – Hooks for the reactivity that bringeth renewal.
+- `shaoline-timer-interval` – The interval for wise renewal of time and battery.
+- `shaoline-message-timeout` – For how many seconds a mortal message abideth before Shaoline's return.
+
+---
+
+** Default Segments
+- shaoline-segment-icon-and-buffer — buffer icon and name:  
+  _Even the emptiest file may mirror the Dao._
+- shaoline-segment-git-branch — the Git branch, if any.
+- shaoline-segment-project-name — project’s name, when it is present.
+- shaoline-segment-battery — the state of the battery (for even the laptop’s existence is fleeting).
+- shaoline-segment-time — the current time (on the hours, see the treatise of Chuang Tzu).
+- shaoline-segment-echo-message — the user’s echo message, when it exists.
+
+[GitHub: https://github.com/11111000000/shaoline]
+
+---
+
+** Illustration
+
+#+ATTR_ORG: :width 80%
+[[file:screenshot-shaoline.png]]
+
+---
+
+_"Do thine own task—then know contentment.  
+Shaoline appeareth when it is needful,  
+And should it vanish—so is the Way."_
+
+To carry the line, carrying it not—a perfection indeed!
