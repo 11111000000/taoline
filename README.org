@@ -103,8 +103,7 @@ M-x customize-group RET shaoline RET
         (:right shaoline-segment-time)))
 #+END_SRC
 
-/
-Full custom list (project → git → time):/
+/Full custom list (project → git → time):/
 
 #+BEGIN_SRC emacs-lisp
 (setq shaoline-segments
