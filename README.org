@@ -1,3 +1,5 @@
+TITLE: Shaoline
+
 * Shaoline: The Path of the Line
 
 _"The Dao that can be spoken is not the Eternal Dao.  
@@ -9,6 +11,23 @@ The True Shaoline leaves behind no trace.
 The line appears only at those times when the Eternal Empty Buffer heaves a sigh:  
 is aught worth utterance?
 
+* Table of Contents
+- [[*Quick Start][Quick Start]]
+- [[*Features][Features]]
+- [[*Teachings on Segments][Teachings on Segments]]
+- [[*Variables at a Glance][Variables at a Glance]]
+- [[*Configuration Examples][Configuration Examples]]
+- [[*Creating Custom Segments][Creating Custom Segments]]
+- [[*The Freedom of the Echo Area][The Freedom of the Echo Area]]
+- [[*Troubleshooting][Troubleshooting]]
+- [[*FAQ][FAQ]]
+- [[*Esoteric Knowledge][Esoteric Knowledge]]
+- [[*Comparison][Comparison]]
+- [[*Default Segments][Default Segments]]
+- [[*Related][Related]]
+- [[*Feedback][Feedback]]
+- [[*Illustration][Illustration]]
+
 ** Quick Start
 
 #+BEGIN_SRC emacs-lisp
@@ -18,7 +37,7 @@ is aught worth utterance?
   (shaoline-mode 1))
 #+END_SRC
 
-or for their who use not *use-package*:
+or for those who use not /use-package/:
 
 #+BEGIN_SRC emacs-lisp
 (require 'shaoline)
@@ -27,16 +46,16 @@ or for their who use not *use-package*:
 
 No child-frame, nor window-modeline—the Shaoline line dances solely within the echo area, untroubled by the tumult of the outer interface.
 
-** Wherefore to Delight in Shaoline
+* Features
 
-- *Minimalism*: The Shaoline line arises only when there is aught to say.
-- *Segments are by nature simple*: Each—forlorn, pure, unfastened by worldly things—disturbs not a neighbour.
-- *Effortless Configuration*: Nothing concealed, all open before thee.
-- *Time doth Flow*: Only as the rain upon the lattice does Shaoline update—stirred by event, never haste.
-- *Transparency and Cheer*: In Shaoline containeth nothing that may not be grasped or altered, provided thy spirit be light.
-- *Simplicity and Candour*: The settings are clear as morning tea sipped in the Valley of Wei.
+- /Minimalism/: The Shaoline line arises only when there is aught to say.
+- /Segments are by nature simple/: Each—forlorn, pure, unfastened by worldly things—disturbs not a neighbour.
+- /Effortless Configuration/: Nothing concealed, all open before thee.
+- /Time doth Flow/: Only as the rain upon the lattice does Shaoline update—stirred by event, never haste.
+- /Transparency and Cheer/: In Shaoline containeth nothing that may not be grasped or altered, provided thy spirit be light.
+- /Simplicity and Candour/: The settings are clear as morning tea sipped in the Valley of Wei.
 
-** Teachings on Segments
+* Teachings on Segments
 
 _"The master divides not the line  
 each portion stands apart.  
@@ -48,12 +67,12 @@ Segments in Shaoline are as monks in silent brotherhood, each close to the Void,
 (setq shaoline-segments
       '((:left shaoline-segment-icon-and-buffer shaoline-segment-git-branch)
         (:center shaoline-segment-echo-message)
-        (:right shaoline-segment-project-name shaoline-segment-time)))
+        (:right shaoline-segment-project-name shaoline-segment-battery shaoline-segment-time)))
 #+END_SRC
 
 Arrange them as stones in a garden: remove, replace, or add—freely, unafraid.
 
-** Variables at a Glance
+* Variables at a Glance
 
 | Variable                    | Description                                      |
 |-----------------------------+--------------------------------------------------|
@@ -61,8 +80,39 @@ Arrange them as stones in a garden: remove, replace, or add—freely, unafraid.
 | shaoline-autohide-modeline  | Hides the default mode-line if t                 |
 | shaoline-timer-interval     | How often Shaoline updates timed segments        |
 | shaoline-message-timeout    | How long before Shaoline resumes after a message |
+| shaoline-update-hooks       | What events trigger Shaoline updates             |
 
-** How to Forge a Segment and not be Reborn as a Beetle
+* Configuration Examples
+
+/Minimalist only-bufname + git branch:/
+
+#+BEGIN_SRC emacs-lisp
+(setq shaoline-segments
+      '((:left shaoline-segment-icon-and-buffer shaoline-segment-git-branch)
+        (:center)
+        (:right)))
+#+END_SRC
+
+/Classic: Custom right segment, removing others:/
+
+#+BEGIN_SRC emacs-lisp
+(setq shaoline-segments
+      '((:left)
+        (:center)
+        (:right shaoline-segment-time)))
+#+END_SRC
+
+/
+Full custom list (project → git → time):/
+
+#+BEGIN_SRC emacs-lisp
+(setq shaoline-segments
+      '((:left shaoline-segment-project-name)
+        (:center)
+        (:right shaoline-segment-git-branch shaoline-segment-time)))
+#+END_SRC
+
+* Creating Custom Segments
 
 _"The Way is ever simple: let thy function return a string."_
 
@@ -72,9 +122,10 @@ Softly and simply, fashion a custom segment:
 (shaoline-define-segment shaoline-segment-buffer-size (buffer)
   "Displays the buffer size."
   (format "%.1fK" (/ (buffer-size buffer) 1024.0)))
+(push 'shaoline-segment-buffer-size (alist-get :right shaoline-segments))
 #+END_SRC
 
-Or, create thus:
+Or, as a mode segment example:
 
 #+BEGIN_SRC emacs-lisp
 (shaoline-define-segment shaoline-segment-buf-modes (buffer)
@@ -85,15 +136,13 @@ Or, create thus:
 (push 'shaoline-segment-buf-modes (alist-get :right shaoline-segments))
 #+END_SRC
 
-Join the commonwealth:
+To /remove all default segments/, simply do:
 
 #+BEGIN_SRC emacs-lisp
-(push 'shaoline-segment-buffer-size (alist-get :right shaoline-segments))
+(setq shaoline-segments '((:left) (:center) (:right)))
 #+END_SRC
 
-"The finest configuration is that which remaineth unnoticed."
-
-** The Freedom of the Echo Area
+* The Freedom of the Echo Area
 
 _"When the cup runneth over—  
 the master sips tea  
@@ -101,55 +150,77 @@ and troubles not the stream."_
 
 A peculiar wisdom: Shaoline manifesteth itself only if the echo area is void. Any Emacs message taketh precedence—Shaoline yields with humility.
 
-** FAQ
-
-- *Where is my mode-line?*  
-  Where Shaoline is not, in Nirvana. Desire it, and it shall return.
-
-- *Shaoline vanishes! Is this enlightenment?*  
-  Shouldst the echo-area be occupied, Shaoline falleth silent.  
-  He waiteth until the void resumes, and only then doth he arise once more.
-
-- *I desire my own segment: what is to be done?*  
-  A function (buffer) → string, registered through shaoline-define-segment—thou art a master already.
-
-- *How can I debug Shaoline?*  
-  Enable `shaoline-debug`, and the entire journey of lines and errors shall be inscribed in the buffer `*shaoline-logs*`.
-
-** Troubleshooting
+* Troubleshooting
 
 Should enlightenment evade thee, seek thus:
 
-- Turn on `shaoline-debug` (`(setq shaoline-debug t)`), and consult `*shaoline-logs*`.
+- Turn on =shaoline-debug= (=(setq shaoline-debug t)=), and consult =*shaoline-logs*=.
 - Temporarily disable other echo-area or mode-line packages—they may conflict.
-- Ensure `(shaoline-mode 1)` is called after desired UI tweaks.
+- Ensure =(shaoline-mode 1)= is called after desired UI tweaks.
+- Toggle hiding of the classic mode-line:  
+  =M-x customize-variable RET shaoline-autohide-modeline=  
+  or  
+  =(setq shaoline-autohide-modeline nil)=
 
-** Esoteric Knowledge
+* FAQ
 
-- `shaoline-segments` – Describeth the structure of the line: leftmost, centre, rightmost.
-- `shaoline-autohide-modeline` – In truth, the mode-line departeth.
-- `shaoline-update-hooks` – Hooks for the reactivity that bringeth renewal.
-- `shaoline-timer-interval` – The interval for wise renewal of time and battery.
-- `shaoline-message-timeout` – For how many seconds a mortal message abideth before Shaoline's return.
+- /Where is my mode-line?/  
+  Where Shaoline is not, in Nirvana. Desire it, and it shall return.
 
-** Default Segments
+- /Shaoline vanishes! Is this enlightenment?/  
+  Shouldst the echo-area be occupied, Shaoline falleth silent.  
+  He waiteth until the void resumes, and only then doth he arise once more.
 
-- shaoline-segment-icon-and-buffer — buffer icon and name:  
-  _Even the emptiest file may mirror the Dao._
-- shaoline-segment-git-branch — the Git branch, if any.
-- shaoline-segment-project-name — project’s name, when it is present.
-- shaoline-segment-battery — the state of the battery (for even the laptop’s existence is fleeting).
-- shaoline-segment-time — the current time (on the hours, see the treatise of Chuang Tzu).
-- shaoline-segment-echo-message — the user’s echo message, when it exists.
+- /I desire my own segment: what is to be done?/  
+  A function (buffer) → string, registered through shaoline-define-segment—thou art a master already.
 
+- /How can I debug Shaoline?/  
+  Enable =shaoline-debug=, and the entire journey of lines and errors shall be inscribed in the buffer =*shaoline-logs*=.
 
-** Related
+* Esoteric Knowledge
 
-- Integrates smoothly with projectile and project.el
-- Compatible with use-package and straight.el
-- Issues and wishes: [GitHub: https://github.com/11111000000/shaoline]
+- =shaoline-segments= – Describeth the structure of the line: leftmost, centre, rightmost.
+- =shaoline-autohide-modeline= – In truth, the mode-line departeth.
+- =shaoline-update-hooks= – Hooks for the reactivity that bringeth renewal.
+- =shaoline-timer-interval= – The interval for wise renewal of time and battery.
+- =shaoline-message-timeout= – For how many seconds a mortal message abideth before Shaoline's return.
 
-** Illustration
+* Comparison
+
+| Project           | Echo Area | Modeline Hide | Segments as Functions | Timers/Polling  | Minimal Dependencies |
+|-------------------+-----------+--------------+----------------------|------------------|---------------------|
+| Shaoline          | Yes       | Yes          | Yes                  | No               | Yes                 |
+| doom-modeline     | No        | Optional     | Mostly               | Yes              | No                  |
+| smart-mode-line   | No        | Optional     | No                   | Yes              | No                  |
+| telephone-line    | No        | Optional     | Partial               | Yes              | No                  |
+
+Shaoline is for those who seek serenity and emptiness—the Echo-area only; no in-window extravagance.
+
+* Default Segments
+
+| Segment name                    | Description                            | Appearance                            |
+|----------------------------------+----------------------------------------+---------------------------------------|
+| shaoline-segment-icon-and-buffer | buffer icon and name                   |  README.org (icon + buffer name)     |
+| shaoline-segment-git-branch      | Current Git branch                     | branch icon + name                    |
+| shaoline-segment-project-name    | Project’s name (projectile/project.el) | "my-project"                          |
+| shaoline-segment-battery         | Battery state                          | 95% 🔋                                |
+| shaoline-segment-time            | Time (hour:minute)                     | 09:21                                 |
+| shaoline-segment-echo-message    | Echo message if any                    | ...                                   |
+
+* Related
+
+- Integrates smoothly with /projectile/ and /project.el/
+- Compatible with /use-package/ and /straight.el/
+- Works best with Emacs 27+
+- Issues and wishes: [[https://github.com/11111000000/shaoline][GitHub |11111000000/shaoline]]
+
+* Feedback
+
+Questions, bug reports, or suggestions welcome via  
+[GitHub issues](https://github.com/11111000000/shaoline)  
+or mail: 11111000000@email.com
+
+* Illustration
 
 #+ATTR_ORG: :width 80%
 [[file:screenshot-shaoline.png]]
