@@ -56,9 +56,9 @@ No child-frame, nor window-modeline—the Shaoline line dances solely within the
 
 * Teachings on Segments
 
-_"The master divides not the line  
+"The master divides not the line  
 each portion stands apart.  
-Yet together they form the path of Shaoline."_
+Yet together they form the path of Shaoline."
 
 Segments in Shaoline are as monks in silent brotherhood, each close to the Void, yet clinging not to his neighbour:
 
@@ -145,9 +145,9 @@ To /remove all default segments/, simply do:
 
 * The Freedom of the Echo Area
 
-_"When the cup runneth over—  
+"When the cup runneth over—  
 the master sips tea  
-and troubles not the stream."_
+and troubles not the stream."
 
 A peculiar wisdom: Shaoline manifesteth itself only if the echo area is void. Any Emacs message taketh precedence—Shaoline yields with humility.
 
@@ -226,8 +226,8 @@ or mail: 11111000000@email.com
 #+ATTR_ORG: :width 80%
 [[file:screenshot-shaoline.png]]
 
-_"Do thine own task—then know contentment.  
+"Do thine own task—then know contentment.  
 Shaoline appeareth when it is needful,  
-And should it vanish—so is the Way."_
+And should it vanish—so is the Way."
 
 To carry the line, carrying it not—a perfection indeed!
