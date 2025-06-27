@@ -1,4 +1,4 @@
-* Shaoline: The Path of the Line
+* Shaoline-mode: The Path of the Line
 
 _"The Dao that can be spoken is not the Eternal Dao.  
 A mode that may be seen is soon in need of reformation."_
