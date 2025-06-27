@@ -3,13 +3,29 @@
 _"The Dao that can be spoken is not the Eternal Dao.  
 A mode that may be seen is soon in need of reformation."_
 
-When thou openest Emacs and beholdest a line wrought by Shaoline,  
+When thou openest Emacs, and beholdest a line wrought by Shaoline,  
 know: thy gaze hath been too intent.  
 The True Shaoline leaves behind no trace.  
 The line appears only at those times when the Eternal Empty Buffer heaves a sigh:  
 is aught worth utterance?
 
----
+** Quick Start
+
+#+BEGIN_SRC emacs-lisp
+(use-package shaoline
+  :ensure t
+  :config
+  (shaoline-mode 1))
+#+END_SRC
+
+or for their who use not *use-package*:
+
+#+BEGIN_SRC emacs-lisp
+(require 'shaoline)
+(shaoline-mode 1)
+#+END_SRC
+
+No child-frame, nor window-modeline—the Shaoline line dances solely within the echo area, untroubled by the tumult of the outer interface.
 
 ** Wherefore to Delight in Shaoline
 
@@ -20,32 +36,9 @@ is aught worth utterance?
 - *Transparency and Cheer*: In Shaoline containeth nothing that may not be grasped or altered, provided thy spirit be light.
 - *Simplicity and Candour*: The settings are clear as morning tea sipped in the Valley of Wei.
 
----
-
-** How to Grasp the Path of Shaoline
-
-Begin, as the ancients commenced:
-
-#+BEGIN_SRC emacs-lisp
-(use-package shaoline
-  :ensure t
-  :config
-  (shaoline-mode 1))
-#+END_SRC
-
-Without *use-package*? Invite truth directly:
-
-#+BEGIN_SRC emacs-lisp
-(shaoline-mode 1)
-#+END_SRC
-
-No child-frame, nor window-modeline—the Shaoline line dances solely within the echo area, untroubled by the tumult of the outer interface.
-
----
-
 ** Teachings on Segments
 
-_"The master divides not the line—  
+_"The master divides not the line  
 each portion stands apart.  
 Yet together they form the path of Shaoline."_
 
@@ -60,7 +53,14 @@ Segments in Shaoline are as monks in silent brotherhood, each close to the Void,
 
 Arrange them as stones in a garden: remove, replace, or add—freely, unafraid.
 
----
+** Variables at a Glance
+
+| Variable                    | Description                                      |
+|-----------------------------+--------------------------------------------------|
+| shaoline-segments           | Controls the display order of line segments      |
+| shaoline-autohide-modeline  | Hides the default mode-line if t                 |
+| shaoline-timer-interval     | How often Shaoline updates timed segments        |
+| shaoline-message-timeout    | How long before Shaoline resumes after a message |
 
 ** How to Forge a Segment and not be Reborn as a Beetle
 
@@ -74,6 +74,17 @@ Softly and simply, fashion a custom segment:
   (format "%.1fK" (/ (buffer-size buffer) 1024.0)))
 #+END_SRC
 
+Or, create thus:
+
+#+BEGIN_SRC emacs-lisp
+(shaoline-define-segment shaoline-segment-buf-modes (buffer)
+  "Shows active major and minor modes."
+  (format "%s %s"
+          (format-mode-line mode-name)
+          (mapconcat #'identity minor-mode-alist " ")))
+(push 'shaoline-segment-buf-modes (alist-get :right shaoline-segments))
+#+END_SRC
+
 Join the commonwealth:
 
 #+BEGIN_SRC emacs-lisp
@@ -81,8 +92,6 @@ Join the commonwealth:
 #+END_SRC
 
 "The finest configuration is that which remaineth unnoticed."
-
----
 
 ** The Freedom of the Echo Area
 
@@ -92,11 +101,7 @@ and troubles not the stream."_
 
 A peculiar wisdom: Shaoline manifesteth itself only if the echo area is void. Any Emacs message taketh precedence—Shaoline yields with humility.
 
----
-
-** Koans
-
-_"A question is thy teacher."_
+** FAQ
 
 - *Where is my mode-line?*  
   Where Shaoline is not, in Nirvana. Desire it, and it shall return.
@@ -108,12 +113,16 @@ _"A question is thy teacher."_
 - *I desire my own segment: what is to be done?*  
   A function (buffer) → string, registered through shaoline-define-segment—thou art a master already.
 
----
+- *How can I debug Shaoline?*  
+  Enable `shaoline-debug`, and the entire journey of lines and errors shall be inscribed in the buffer `*shaoline-logs*`.
 
-** The Hidden Scrolls of Shaoline
+** Troubleshooting
 
-Enable `shaoline-debug` and the entire journey of lines and errors shall be inscribed in the buffer `*shaoline-logs*`.  
-There may the pilgrim find answers to queries and the traces of imperfect segments.
+Should enlightenment evade thee, seek thus:
+
+- Turn on `shaoline-debug` (`(setq shaoline-debug t)`), and consult `*shaoline-logs*`.
+- Temporarily disable other echo-area or mode-line packages—they may conflict.
+- Ensure `(shaoline-mode 1)` is called after desired UI tweaks.
 
 ** Esoteric Knowledge
 
@@ -123,9 +132,8 @@ There may the pilgrim find answers to queries and the traces of imperfect segmen
 - `shaoline-timer-interval` – The interval for wise renewal of time and battery.
 - `shaoline-message-timeout` – For how many seconds a mortal message abideth before Shaoline's return.
 
----
-
 ** Default Segments
+
 - shaoline-segment-icon-and-buffer — buffer icon and name:  
   _Even the emptiest file may mirror the Dao._
 - shaoline-segment-git-branch — the Git branch, if any.
@@ -134,16 +142,17 @@ There may the pilgrim find answers to queries and the traces of imperfect segmen
 - shaoline-segment-time — the current time (on the hours, see the treatise of Chuang Tzu).
 - shaoline-segment-echo-message — the user’s echo message, when it exists.
 
-[GitHub: https://github.com/11111000000/shaoline]
 
----
+** Related
+
+- Integrates smoothly with projectile and project.el
+- Compatible with use-package and straight.el
+- Issues and wishes: [GitHub: https://github.com/11111000000/shaoline]
 
 ** Illustration
 
 #+ATTR_ORG: :width 80%
 [[file:screenshot-shaoline.png]]
-
----
 
 _"Do thine own task—then know contentment.  
 Shaoline appeareth when it is needful,  
