@@ -137,33 +137,6 @@ and troubleth not the stream."
 
 A peculiar wisdom: Shaoline manifesteth itself only when the echo area is void. Any Emacs message taketh precedence—Shaoline yieldeth in humility.
 
-* Troubleshooting
-
-Should enlightenment elude thee, seek thus:
-
-- Turn on =shaoline-debug= (=(setq shaoline-debug t)=), and consult =*shaoline-logs*=.
-- Temporarily disable other echo-area or mode-line packages—they may conflict.
-- Ensure =(shaoline-mode 1)= is called after thy desired UI tweaks.
-- Toggle hiding of the classic mode-line:  
-  =M-x customize-variable RET shaoline-autohide-modeline=  
-  or  
-  =(setq shaoline-autohide-modeline nil)=
-
-* FAQ
-
-- /Where is my mode-line?/  
-  Where Shaoline is not, there is Nirvana. Desire it, and it shall return.
-
-- /Shaoline vanisheth! Is this enlightenment?/  
-  Should the echo-area be occupied, Shaoline falleth silent.  
-  He waiteth until the void returneth, and only then doth he arise once more.
-
-- /I desire my own segment: what is to be done?/  
-  A function (buffer) → string, registered through shaoline-define-segment—thou art a master already.
-
-- /How can I debug Shaoline?/  
-  Enable =shaoline-debug=, and the entire journey of lines and errors shall be inscribed in the buffer =*shaoline-logs*=.
-
 * Esoteric Knowledge
 
 - =shaoline-segments= – Describeth the structure of the line: leftmost, centre, rightmost.
@@ -193,6 +166,35 @@ Shaoline is for those who seek serenity and emptiness—the echo area only; no i
 | shaoline-segment-battery         | Battery state                          | 95% 🔋                                |
 | shaoline-segment-time            | Time (hour:minute)                     | 09:21                                 |
 | shaoline-segment-echo-message    | Echo message if any                    | ...                                   |
+
+* Troubleshooting
+
+Should enlightenment elude thee, seek thus:
+
+- Turn on =shaoline-debug= (=(setq shaoline-debug t)=), and consult =*shaoline-logs*=.
+- Temporarily disable other echo-area or mode-line packages—they may conflict.
+- Ensure =(shaoline-mode 1)= is called after thy desired UI tweaks.
+- Toggle hiding of the classic mode-line:  
+  =M-x customize-variable RET shaoline-autohide-modeline=  
+  or  
+  =(setq shaoline-autohide-modeline nil)=
+
+
+* FAQ
+
+- /Where is my mode-line?/  
+  Where Shaoline is not, there is Nirvana. Desire it, and it shall return.
+
+- /Shaoline vanisheth! Is this enlightenment?/  
+  Should the echo-area be occupied, Shaoline falleth silent.  
+  He waiteth until the void returneth, and only then doth he arise once more.
+
+- /I desire my own segment: what is to be done?/  
+  A function (buffer) → string, registered through shaoline-define-segment—thou art a master already.
+
+- /How can I debug Shaoline?/  
+  Enable =shaoline-debug=, and the entire journey of lines and errors shall be inscribed in the buffer =*shaoline-logs*=.
+
 
 * Related
 
