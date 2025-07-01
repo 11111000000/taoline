@@ -1,83 +1,83 @@
-*pro-tabs** — современный и настраиваемый мод, который приводит tab-bar и tab-line в Emacs к единому красивому стилю: с современными иконками, лаконичным внешним видом, глифами, волнообразными разделителями и без лишних кнопок. Основная цель — сделать стандартные вкладки в Emacs эстетичными, понятными и одинаково оформленными как в tab-bar, так и в tab-line. Всё выглядит целостно, лаконично и очень удобно для быстрого переключения между буферами и сессиями!
+*pro-tabs-mode* — a modern and customizable mode that unifies Emacs tab-bar and tab-line into a singular beautiful style: with modern icons, a sleek appearance, glyphs, wavy colorful separators, and no excessive buttons. The main goal is to make the standard Emacs tabs aesthetic, clear, and consistently styled both in tab-bar and tab-line. Everything looks integrated, concise, and very convenient for quickly switching between buffers and sessions!
 
-** Скриншот
+** Screenshot
 
 #+ATTR_HTML: :width 800px
 [[./screenshot.png]]
 
-_(На скриншоте: в верхней части — tab-bar, ниже — tab-line; у каждой вкладки и буфера — своя иконка, плавные разноцветные разделители-волны, минимум лишних кнопок и элементов интерфейса.)_
+_(In the screenshot: at the top is the tab-bar, below is the tab-line; each tab and buffer has its own icon, smooth colorful wavy separators, and a minimum of extra buttons and interface elements.)_
 
-** Основные возможности
+** Main Features
 
-- Единое оформление для tab-bar и tab-line: вкладки всегда выглядят одинаково современно.
-- Иконки для буферов и вкладок на основе all-the-icons: вы сразу видите, где code, где org, где shell и т.п.
-- Красивые глифы, emoji и оформление каждой вкладки.
-- Компактный вид — никакие кнопки New/Close и лишние элементы не отображаются (по умолчанию).
-- Волнообразные (wave, XPM) цветные разделители между вкладками для плавного интерфейса.
-- Быстрый выбор и переключение между вкладками с помощью одной клавиши (Super+1...Super+0).
-- Интеграция с vterm и telega: для них tab-line включается автоматически.
-- Быстрое закрытие и буфера, и вкладки одной командой.
-- Всё настраивается через M-x customize-group RET pro-tabs RET.
+- Unified appearance for tab-bar and tab-line: tabs always look equally modern.
+- Icons for buffers and tabs based on all-the-icons: immediately see where your code, org, shell, etc. buffers are.
+- Beautiful glyphs, emoji, and styling for each tab.
+- Compact look — no New/Close buttons or extra elements shown (by default).
+- Wavy (wave, XPM) colorful separators between tabs for a smooth interface.
+- Fast navigation between tabs with a single key (Super+1...Super+0).
+- Integration with vterm and telega: tab-line is enabled automatically for them.
+- Rapid close of both buffer and its tab with a single command.
+- All options customizable via M-x customize-group RET pro-tabs RET.
 
-** Быстрый старт
+** Quick Start
 
-1. Установите зависимость `all-the-icons`:
+1. Install the `all-the-icons` dependency:
 
    M-x package-install RET all-the-icons RET
 
-2. Скопируйте `pro-tabs.el` в любой каталог из вашего `load-path`.
+2. Copy `pro-tabs.el` to any directory in your `load-path`.
 
-3. Добавьте в ваш init-файл строки:
+3. Add the following lines to your init file:
 
    #+begin_src emacs-lisp
    (require 'pro-tabs)
    (pro-tabs-mode 1)
    #+end_src
 
-4. Опционально настройте переменные через `M-x customize-group RET pro-tabs` или `setq` до активации мода.
+4. Optionally configure variables via `M-x customize-group RET pro-tabs` or `setq` before enabling the mode.
 
-** Основные команды
+** Key Commands
 
-- `M-x pro-tabs-mode` — включить/выключить мод (меняет оформление tab-bar и tab-line сразу).
-- `M-x pro-tabs-open-new-tab` — открыть новую Emacs-вкладку с dashboard (если установлен dashboard).
-- `M-x pro-tabs-close-tab-and-buffer` — закрыть одновременно текущий буфер и связанную с ним вкладку.
-- Быстрый переход: `s-1 ... s-9, s-0` — переключение между вкладками по их номеру.
+- `M-x pro-tabs-mode` — enable/disable the mode (changes both tab-bar and tab-line styles at once).
+- `M-x pro-tabs-open-new-tab` — open a new Emacs tab with dashboard (if dashboard is installed).
+- `M-x pro-tabs-close-tab-and-buffer` — simultaneously close the current buffer and its associated tab.
+- Quick switch: `s-1 ... s-9, s-0` — instantly switch between tabs by number.
 
-** Настраиваемые переменные
+** Customizable Variables
 
-- `pro-tabs-enable-icons` (t/nil): показывать ли иконки в tab-bar и tab-line.
-- `pro-tabs-max-tab-name-length`: максимальная длина подписи вкладки (лишнее будет сокращено с "…").
-- `pro-tabs-tab-bar-height`: высота вкладок в tab-bar (в пикселях).
-- `pro-tabs-tab-line-height`: высота вкладок в tab-line (в пикселях).
+- `pro-tabs-enable-icons` (t/nil): whether to show icons in tab-bar and tab-line.
+- `pro-tabs-max-tab-name-length`: maximum tab caption length (extra text is truncated with "…").
+- `pro-tabs-tab-bar-height`: tab-bar tab height (pixels).
+- `pro-tabs-tab-line-height`: tab-line tab height (pixels).
 
-Меняйте их через customize (`M-x customize-group RET pro-tabs RET`) или с помощью `setq` до запуска `(pro-tabs-mode 1)`.
+Set them via customize (`M-x customize-group RET pro-tabs RET`) or with `setq` before running `(pro-tabs-mode 1)`.
 
-** Автотесты
+** Automated Tests
 
-Для запуска автотестов:
+To run tests:
 
-1. Откройте файл `pro-tabs-test.el` и выполните:
+1. Open the file `pro-tabs-test.el` and run:
    #+begin_src emacs-lisp
    M-x ert RET pro-tabs- RET
    #+end_src
-   — появится список всех тестов для pro-tabs.
+   — this shows all tests for pro-tabs.
 
-   Либо из Lisp:
+   Or from Lisp:
 
    #+begin_src emacs-lisp
    (ert 'pro-tabs-enable-disable)
    #+end_src
 
-** Требования
+** Requirements
 
-- Emacs 27.1 или выше
-- [all-the-icons](https://github.com/domtronn/all-the-icons.el) (для поддержки иконок)
+- Emacs 27.1 or higher
+- [all-the-icons](https://github.com/domtronn/all-the-icons.el) (for icon support)
 
-** Лицензия
+** License
 
 MIT
 
 ---
 
-Автор: Peter Kosov  
-Ссылка на репозиторий: https://github.com/11111000000/pro-tabs
+Author: Peter Kosov  
+Repository: https://github.com/11111000000/pro-tabs
