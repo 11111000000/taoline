@@ -452,6 +452,8 @@ A pending timer will eventually bring back Shaoline's modeline."
 (defvar shaoline--timer nil
   "Internal timer used by `shaoline-mode' for periodic updates.")
 
+(require 'cl-lib)
+
 ;;;###autoload
 (define-minor-mode shaoline-mode
   "Global minor mode that displays a functional minimalist modeline in echo-area."
@@ -588,35 +590,63 @@ You may need to adapt this for your font & setup.")
     (propertize padded-str 'face 'shaoline-echo-face)))
 
 ;; Battery segment (if `battery` is available)
-(shaoline-define-simple-segment shaoline-segment-battery
-  "Battery status with icon."
-  (when (and (fboundp 'battery) battery-status-function)
-    (let* ((data (and battery-status-function (funcall battery-status-function)))
-           (percent (cdr (assoc ?p data)))
-           (status  (cdr (assoc ?B data))) ;; charging, discharging, etc.
-           (icon
-            (cond
-             ((not (featurep 'all-the-icons)) "")
-             ((and status (string-match-p "AC" status))
-              (all-the-icons-octicon "plug" :face 'shaoline-battery-face :height 1.0 :v-adjust 0))
-             ((and status (string-match-p "Charging" status))
-              (all-the-icons-faicon "bolt" :face 'shaoline-battery-face :height 1.0 :v-adjust 0))
-             ((and percent (string-match "\\([0-9]+\\)" percent))
-              (let* ((n (string-to-number (match-string 1 percent))))
-                (cond
-                 ((>= n 95) (all-the-icons-faicon "battery-full" :face 'shaoline-battery-face :height 1.0 :v-adjust 0))
-                 ((>= n 75) (all-the-icons-faicon "battery-three-quarters" :face 'shaoline-battery-face :height 1.0 :v-adjust -0.1))
-                 ((>= n 50) (all-the-icons-faicon "battery-half" :face 'shaoline-battery-face :height 1.0 :v-adjust 0))
-                 ((>= n 25) (all-the-icons-faicon "battery-quarter" :face 'shaoline-battery-face :height 1.0 :v-adjust 0))
-                 (t (all-the-icons-faicon "battery-empty" :face 'shaoline-battery-face :height 1.0 :v-adjust 0)))))
-             (t ""))))
-      (when percent
-        (concat
-         (when (and (stringp icon) (not (string-empty-p icon)))
-           (concat icon " "))
+(shaoline-define-simple-segment
+ shaoline-segment-battery
+ "Show battery percentage and charging status (icon, optional).
+Requires `all-the-icons` and a working `battery-status-function`."
+ (if (and (fboundp 'battery)
+          battery-status-function)
+     (let* ((data (and battery-status-function (funcall battery-status-function))))
+       (cond
+        ;; (A) If data is an alist (list of cons cells), use the old logic 
+        ((and (listp data)
+              (not (null data))
+              (cl-every #'consp data))
+         (let* ((percent (cdr (assoc 112 data)))
+                (status (cdr (assoc 66 data)))
+                (icon (cond
+                       ((not (featurep 'all-the-icons)) "")
+                       ((and status (string-match-p "AC" status))
+                        (all-the-icons-octicon "plug" :face 'shaoline-battery-face :height 1.0 :v-adjust 0))
+                       ((and status (string-match-p "Charging" status))
+                        (all-the-icons-faicon "bolt" :face 'shaoline-battery-face :height 1.0 :v-adjust 0))
+                       ((and percent (string-match "\\([0-9]+\\)" percent))
+                        (let* ((n (string-to-number (match-string 1 percent))))
+                          (cond ((>= n 90) (all-the-icons-faicon "battery-full"
+                                                                  :face 'shaoline-battery-face :height 1.0 :v-adjust 0))
+                                ((>= n 70) (all-the-icons-faicon "battery-three-quarters"
+                                                                :face 'shaoline-battery-face :height 1.0 :v-adjust 0))
+                                ((>= n 40) (all-the-icons-faicon "battery-half"
+                                                                :face 'shaoline-battery-face :height 1.0 :v-adjust 0))
+                                ((>= n 10) (all-the-icons-faicon "battery-quarter"
+                                                                :face 'shaoline-battery-face :height 1.0 :v-adjust 0))
+                                (t (all-the-icons-faicon "battery-empty"
+                                                         :face 'shaoline-battery-face :height 1.0 :v-adjust 0)))))
+                       (t ""))))
+           (if percent
+               (concat
+                (if (and (stringp icon) (not (string-empty-p icon)))
+                    (concat icon " "))
+                (propertize (concat (replace-regexp-in-string "%" "" percent) "%")
+                            'face 'shaoline-battery-face)))
+           (propertize
+            (if (featurep 'all-the-icons)
+                (all-the-icons-faicon "battery-empty" :height 1.0 :v-adjust 0 :face 'shaoline-battery-face)
+              "N/A")
+            'face '(:inherit shaoline-battery-face :slant italic))))
+        ;; (B) If data is a string (your case), just display it
+        ((and (stringp data)
+              (not (string-empty-p data)))
+         (propertize data 'face 'shaoline-battery-face))
+        ;; (C) Fallback ("No battery" symbol)
+        (t
          (propertize
-          (concat (replace-regexp-in-string "%" "" percent) "%")
-          'face 'shaoline-battery-face))))))
+          (if (featurep 'all-the-icons)
+              (all-the-icons-faicon "battery-empty" :height 1.0 :v-adjust 0 :face 'shaoline-battery-face)
+            "N/A")
+          'face '(:inherit shaoline-battery-face :slant italic)))))
+   ;; battery functionality not available
+   ""))
 
 ;; Major-mode
 (shaoline-define-simple-segment shaoline-segment-major-mode
