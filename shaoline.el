@@ -48,6 +48,7 @@
 (eval-when-compile (require 'rx))
 (require 'projectile nil t)
 (require 'all-the-icons nil t)
+(require 'battery nil t)
 
 ;; ----------------------------------------------------------------------------
 ;; Customization group and variables
