@@ -49,6 +49,37 @@
 (require 'projectile nil t)
 (require 'all-the-icons nil t)
 (require 'battery nil t)
+(require 'calendar)
+
+;; Helper: compute moon phase index 0..7 for a given date.
+;; 0 = new moon, 4 = full moon, etc.
+(defun calendar-phase-of-moon (&optional date)
+  "Return moon phase index 0..7 for DATE (Gregorian list). Defaults to today.
+0 = new moon, 4 = full moon."
+  (let* ((d        (or date (calendar-current-date)))
+         (abs-day  (float (calendar-absolute-from-gregorian d)))
+         (synodic  29.530588853)  ; length of synodic month
+         ;; age in days since last new moon:
+         (age      (- abs-day
+                       (* (floor (/ abs-day synodic)) synodic)))
+         ;; scale age to 0..8, then floor to 0..7
+         (idx      (mod (floor (* age (/ 8.0 synodic))) 8)))
+    idx))
+
+;; Helper: compute moon phase index 0..7 for a given date.
+;; 0 = new moon, 4 = full moon, etc.
+(defun calendar-phase-of-moon (&optional date)
+  "Return moon phase index 0..7 for DATE (Gregorian list). Defaults to today.
+0 = new moon, 4 = full moon."
+  (let* ((d        (or date (calendar-current-date)))
+         (abs-day  (float (calendar-absolute-from-gregorian d)))
+         (synodic  29.530588853)  ; length of synodic month
+         ;; age in days since last new moon:
+         (age      (- abs-day
+                       (* (floor (/ abs-day synodic)) synodic)))
+         ;; scale age to 0..8, then floor to 0..7
+         (idx      (mod (floor (* age (/ 8.0 synodic))) 8)))
+    idx))
 
 ;; ----------------------------------------------------------------------------
 ;; Customization group and variables
@@ -60,7 +91,14 @@
   :group 'convenience
   :prefix "shaoline-")
 
-(defcustom shaoline-debug nil
+(defcustom shaoline-icon-width 2
+  "Width in characters to pad or truncate all-the-icons icons for consistent spacing.
+Increase if your favorite icons are wider."
+  :type 'integer
+  :group 'shaoline)
+
+
+(defcustom shaoline-debug t
   "If non-nil, log shaoline activity into `shaoline--log-buffer'. Seek inner debugness."
   :type 'boolean
   :group 'shaoline)
@@ -98,7 +136,7 @@ Tweak segments as calmly as rearranging stones: simply, purposefully."
   :type 'boolean
   :group 'shaoline)
 
-(defcustom shaoline-right-padding 13
+(defcustom shaoline-right-padding 16
   "Extra spaces appended to the right edge of the shaoline. Sometimes, a little emptiness is all you need."
   :type 'integer
   :group 'shaoline)
@@ -238,6 +276,7 @@ The value saved in `shaoline--saved-mode-line-format` is restored and the marker
 
 ;; ----------------------------------------------------------------------------
 ;; Segment definition macros
+
 
 (defmacro shaoline-define-segment (name args &rest body)
   "Define segment NAME taking ARGS, register it, and return its symbol.
@@ -539,6 +578,25 @@ You may need to adapt this for your font & setup.")
      text)
     text))
 
+(shaoline-define-segment shaoline-segment-icon-and-buffer (buffer)
+  "Icon for BUFFER (padded/truncated to `shaoline-icon-width`) and its name."
+  (let* ((raw-icon (and (fboundp 'all-the-icons-icon-for-buffer)
+                        (with-current-buffer buffer
+                          (all-the-icons-icon-for-buffer))))
+         (icon      (or raw-icon ""))
+         (width     (max 0 (or (and (boundp 'shaoline-icon-width)
+                                    shaoline-icon-width)
+                               2)))
+         (icon-str
+          ;; pad or truncate the icon string to `width`
+          (let ((w (string-width icon)))
+            (cond
+             ((< w width)    (concat icon (make-string (- width w) ?\s)))
+             ((> w width)    (truncate-string icon width))
+             (t               icon))))
+         (buf-name  (buffer-name buffer)))
+    (concat icon-str " " buf-name)))
+
 ;; Project name (for example, Projectile)
 (shaoline-define-simple-segment shaoline-segment-project-name
   "Project name, if available."
@@ -683,10 +741,20 @@ Requires `all-the-icons` and a working `battery-status-function`."
       (format-mode-line mode-name)
       'face 'shaoline-mode-face))))
 
-;; Time segment
+;; Time + Moon Phase segment
+;; We need calendar for `calendar-phase-of-moon` and `calendar-current-date`.
+
 (shaoline-define-simple-segment shaoline-segment-time
-  "Current time."
-  (propertize (format-time-string "%H:%M") 'face 'shaoline-time-face))
+  "Current time with moon phase."
+  (let* ((time (propertize (format-time-string "%H:%M")
+                           'face 'shaoline-time-face))
+         ;; 0 = new, 4 = full, etc. 0–7 index into our icons.
+         (phase-number (calendar-phase-of-moon
+                        (calendar-current-date)))
+         (phases ["🌑" "🌒" "🌓" "🌔" "🌕" "🌖" "🌗" "🌘"])
+         (moon (propertize (aref phases phase-number)
+                           'face 'shaoline-time-face)))
+    (concat time " " moon)))
 
 ;; ---------------------------------------------------------------------------
 
