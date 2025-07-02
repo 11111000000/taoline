@@ -602,14 +602,32 @@ Requires `all-the-icons` and a working `battery-status-function`."
         ((and (listp data)
               (not (null data))
               (cl-every #'consp data))
-         (let* ((percent (cdr (assoc 112 data)))
-                (status (cdr (assoc 66 data)))
+         (let* ((percent (or (cdr (assoc 112 data))           ; char code ?p
+                             (cdr (assoc "percentage" data))  ; string key
+                             (cdr (assoc "perc" data))        ; alt string key
+                             (cdr (assoc "capacity" data))))  ; another possible key
+                (status (or (cdr (assoc 66 data))             ; char code ?B
+                            (cdr (assoc "status" data))
+                            (cdr (assoc "charging" data))
+                            (cdr (assoc "state" data))))
                 (icon (cond
                        ((not (featurep 'all-the-icons)) "")
-                       ((and status (string-match-p "AC" status))
+                       ((and status
+                             (let ((case-fold-search t))
+                               (string-match-p "ac" status)))
                         (all-the-icons-octicon "plug" :face 'shaoline-battery-face :height 1.0 :v-adjust 0))
-                       ((and status (string-match-p "Charging" status))
+                       ((and status
+                             (let ((case-fold-search t))
+                               (string-match-p "charging" status)))
                         (all-the-icons-faicon "bolt" :face 'shaoline-battery-face :height 1.0 :v-adjust 0))
+                       ((and status
+                             (let ((case-fold-search t))
+                               (string-match-p "discharging" status)))
+                        "")  ;; Could use a separate icon for discharging if desired
+                       ((and status
+                             (let ((case-fold-search t))
+                               (string-match-p "full" status)))
+                        (all-the-icons-faicon "battery-full" :face 'shaoline-battery-face :height 1.0 :v-adjust 0))
                        ((and percent (string-match "\\([0-9]+\\)" percent))
                         (let* ((n (string-to-number (match-string 1 percent))))
                           (cond ((>= n 90) (all-the-icons-faicon "battery-full"
@@ -628,12 +646,15 @@ Requires `all-the-icons` and a working `battery-status-function`."
                 (if (and (stringp icon) (not (string-empty-p icon)))
                     (concat icon " "))
                 (propertize (concat (replace-regexp-in-string "%" "" percent) "%")
-                            'face 'shaoline-battery-face)))
-           (propertize
-            (if (featurep 'all-the-icons)
-                (all-the-icons-faicon "battery-empty" :height 1.0 :v-adjust 0 :face 'shaoline-battery-face)
-              "N/A")
-            'face '(:inherit shaoline-battery-face :slant italic))))
+                            'face 'shaoline-battery-face))
+             ;; If no percent, show a fallback "no battery" string with an icon if possible.
+             (propertize
+              (if (featurep 'all-the-icons)
+                  (concat
+                   (all-the-icons-faicon "battery-empty" :height 1.0 :v-adjust 0 :face 'shaoline-battery-face)
+                   " No battery")
+                "No battery")
+              'face '(:inherit shaoline-battery-face :slant italic)))))
         ;; (B) If data is a string (your case), just display it
         ((and (stringp data)
               (not (string-empty-p data)))
