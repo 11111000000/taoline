@@ -51,7 +51,7 @@
   :type 'integer
   :group 'pro-tabs)
 
-(defcustom pro-tabs-tab-bar-height 18
+(defcustom pro-tabs-tab-bar-height 20
   "Height (in pixels) for pro-tabs tab-bar formatting."
   :type 'integer
   :group 'pro-tabs)
