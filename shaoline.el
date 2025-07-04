@@ -577,25 +577,6 @@ You may need to adapt this for your font & setup.")
      text)
     text))
 
-(shaoline-define-segment shaoline-segment-icon-and-buffer (buffer)
-  "Icon for BUFFER (padded/truncated to `shaoline-icon-width`) and its name."
-  (let* ((raw-icon (and (fboundp 'all-the-icons-icon-for-buffer)
-                        (with-current-buffer buffer
-                          (all-the-icons-icon-for-buffer))))
-         (icon      (or raw-icon ""))
-         (width     (max 0 (or (and (boundp 'shaoline-icon-width)
-                                    shaoline-icon-width)
-                               2)))
-         (icon-str
-          ;; pad or truncate the icon string to `width`
-          (let ((w (string-width icon)))
-            (cond
-             ((< w width)    (concat icon (make-string (- width w) ?\s)))
-             ((> w width)    (truncate-string icon width))
-             (t               icon))))
-         (buf-name  (buffer-name buffer)))
-    (concat icon-str " " buf-name)))
-
 ;; Project name (for example, Projectile)
 (shaoline-define-simple-segment shaoline-segment-project-name
   "Project name, if available."
