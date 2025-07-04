@@ -51,35 +51,6 @@
 (require 'battery nil t)
 (require 'calendar)
 
-;; Helper: compute moon phase index 0..7 for a given date.
-;; 0 = new moon, 4 = full moon, etc.
-(defun calendar-phase-of-moon (&optional date)
-  "Return moon phase index 0..7 for DATE (Gregorian list). Defaults to today.
-0 = new moon, 4 = full moon."
-  (let* ((d        (or date (calendar-current-date)))
-         (abs-day  (float (calendar-absolute-from-gregorian d)))
-         (synodic  29.530588853)  ; length of synodic month
-         ;; age in days since last new moon:
-         (age      (- abs-day
-                       (* (floor (/ abs-day synodic)) synodic)))
-         ;; scale age to 0..8, then floor to 0..7
-         (idx      (mod (floor (* age (/ 8.0 synodic))) 8)))
-    idx))
-
-;; Helper: compute moon phase index 0..7 for a given date.
-;; 0 = new moon, 4 = full moon, etc.
-(defun calendar-phase-of-moon (&optional date)
-  "Return moon phase index 0..7 for DATE (Gregorian list). Defaults to today.
-0 = new moon, 4 = full moon."
-  (let* ((d        (or date (calendar-current-date)))
-         (abs-day  (float (calendar-absolute-from-gregorian d)))
-         (synodic  29.530588853)  ; length of synodic month
-         ;; age in days since last new moon:
-         (age      (- abs-day
-                       (* (floor (/ abs-day synodic)) synodic)))
-         ;; scale age to 0..8, then floor to 0..7
-         (idx      (mod (floor (* age (/ 8.0 synodic))) 8)))
-    idx))
 
 ;; ----------------------------------------------------------------------------
 ;; Customization group and variables
@@ -166,7 +137,7 @@ Tweak segments as calmly as rearranging stones: simply, purposefully."
   :group 'shaoline)
 
 (defface shaoline-battery-face
-  '((t :inherit (success shaoline-base-face) :height 0.8))
+  '((t :inherit (shaoline-base-face)))
   "Face for battery level segment."
   :group 'shaoline)
 
@@ -203,6 +174,12 @@ Tweak segments as calmly as rearranging stones: simply, purposefully."
 
 (defvar shaoline--last-str ""
   "Last rendered string, used to avoid unnecessary redisplay. Repetition is not enlightenment.")
+
+(defvar shaoline--last-user-message nil
+  "Last *user* message captured by Shaoline (string or nil).")
+
+(defvar shaoline--last-user-message-ts 0
+  "Timestamp (as returned by `float-time') when the last user message was stored.")
 
 (defvar shaoline--default-mode-line-format-backup nil
   "Backup of `default-mode-line-format' when the modeline is hidden (restored when Shaoline is disabled).")
@@ -401,13 +378,17 @@ the window width.  This guarantees, for example, что иконка фазы
 ;; Display/update
 
 (defun shaoline--display (str)
-  "Show STR in the echo area, only if it's different from the previous output or if the echo area is empty."
+  "Show STR in the echo area.  The string is tagged with the text-property
+'shaoline so later we can reliably distinguish our own output."
   (let ((cur-msg (current-message)))
     (when (or (not (string-equal str shaoline--last-str))
               (null cur-msg))
+      ;; Remember *unmodified* string for width-comparison / clearing,
+      ;; but send the *tagged* one to `message'.
       (setq shaoline--last-str str)
-      (let ((message-log-max nil))
-        (message "%s" str)))))
+      (let* ((msg-with-prop (propertize str 'shaoline t))
+             (message-log-max nil))
+        (message "%s" msg-with-prop)))))
 
 (defun shaoline--update (&rest _)
   "Recompute the modeline for the `selected-window` and display.
@@ -431,9 +412,11 @@ Sometimes, true clarity is emptiness."
 ;; ----------------------------------------------------------------------------
 ;; Minor mode
 
-(defcustom shaoline-timer-interval 15
-  "Interval in seconds for updating time and battery segments.
-Even time updates only when it ought to—not a second sooner."
+(defcustom shaoline-timer-interval 1
+  "Interval (seconds) for Shaoline’s periodic refresh.
+
+A low value (default 1 s) lets echo-messages expire precisely while
+CPU impact stays negligible."
   :type 'number
   :group 'shaoline)
 
@@ -442,8 +425,12 @@ Even time updates only when it ought to—not a second sooner."
 
 (defcustom shaoline-message-timeout 10
   "Seconds to keep a regular `message` in the echo area before Shaoline
-redraws its modeline. If set to 0, the modeline is not redrawn automatically
-(until something else triggers it)."
+redraws its modeline.
+
+If set to 0 (or a negative number), Shaoline **immediately** redraws the
+modeline right after the `message` call, so the text never appears in the
+echo area by itself; it is shown only inside the
+`shaoline-segment-echo-message` segment."
   :type 'number
   :group 'shaoline)
 
@@ -452,20 +439,12 @@ redraws its modeline. If set to 0, the modeline is not redrawn automatically
 refresh when `shaoline-message-timeout` seconds have elapsed.")
 
 (defun shaoline--cancel-redisplay-timer ()
-  "Cancel and clear `shaoline--redisplay-timer` if active."
-  (when (timerp shaoline--redisplay-timer)
-    (cancel-timer shaoline--redisplay-timer)
-    (setq shaoline--redisplay-timer nil)))
+  "Compatibility stub – the separate idle-redisplay timer is no longer used."
+  nil)
 
 (defun shaoline--schedule-redisplay ()
-  "Start (or restart) `shaoline--redisplay-timer'."
-  (shaoline--cancel-redisplay-timer)
-  (when (and shaoline-message-timeout
-             (> shaoline-message-timeout 0))
-    (setq shaoline--redisplay-timer
-          (run-at-time shaoline-message-timeout
-                       nil
-                       #'shaoline--update))))
+  "Compatibility stub – idle redisplay timer removed in the simplified design."
+  nil)
 
 (defun shaoline--message-filter-return (result &rest _args)
   "Let Shaoline play nicely with regular `message' output.
@@ -474,14 +453,29 @@ When `shaoline-mode' is active, retain the user's message in the echo area
 for at least `shaoline-message-timeout` seconds. A non-empty RESULT (from `message`)
 restarts the timer; empty results neither erase text nor force a redraw.
 A pending timer will eventually bring back Shaoline's modeline."
-  (when shaoline-mode
+  ;; Ignore Shaoline’s *own* output – it carries the text-property
+  ;; 'shaoline t that we added in `shaoline--display'.
+  ;; Обходим ошибку «args-out-of-range» ─ вызываем get-text-property
+  ;; только если RESULT ‑ строка.  Для всех остальных типов (nil,
+  ;; числа и пр.) считаем, что это не Shaoline-сообщение.
+  (when (and shaoline-mode
+             (not (and (stringp result)
+                       (get-text-property 0 'shaoline result))))
     (cond
-     ;; New, non-empty message – restart the timer.
+     ;; New, non-empty message: remember it and show through Shaoline.
      ((and (stringp result) (not (string-empty-p result)))
-      (shaoline--schedule-redisplay))
-     ;; Empty result – if no timer is running, start one so Shaoline returns.
-     ((null shaoline--redisplay-timer)
-      (shaoline--schedule-redisplay))))
+      (setq shaoline--last-user-message result
+            shaoline--last-user-message-ts (float-time))
+      ;; Запускаем обновление *после* возврата из оригинального
+      ;; `message', чтобы не войти повторно в `toggle-input-method'
+      ;; (и прочие функции, которые сами используют `message').
+      (run-at-time 0 nil #'shaoline--update)) ; отложенное обновление
+
+     ;; Пустое сообщение – очищаем сохранённый текст немедленно.
+     ((or (null result) (string-empty-p result))
+      (setq shaoline--last-user-message nil
+            shaoline--last-user-message-ts 0)
+      (run-at-time 0 nil #'shaoline--update))))
   result)
 
 
@@ -490,8 +484,6 @@ A pending timer will eventually bring back Shaoline's modeline."
 
 (defvar shaoline--timer nil
   "Internal timer used by `shaoline-mode' for periodic updates.")
-
-(require 'cl-lib)
 
 ;;;###autoload
 (define-minor-mode shaoline-mode
@@ -602,30 +594,26 @@ You may need to adapt this for your font & setup.")
          " "
          (propertize branch 'face 'shaoline-git-face))))))
 
-;; Project name (projectile)
-(shaoline-define-simple-segment shaoline-segment-project-name
-  "Project name via projectile."
-  (when (and (featurep 'projectile) (projectile-project-p))
-    (concat
-     (all-the-icons-faicon "folder-o" :v-adjust 0 :height 1.0 :face 'shaoline-base-face)
-     " "
-     (projectile-project-name))))
+
 
 ;; Echo-area message segment (for demonstration – shows `current-message`)
 (shaoline-define-simple-segment shaoline-segment-echo-message
-  "Current echo message excluding shaoline itself, растянутый на всю ширину между левым и правым сегментами."
-  (let* ((msg  (current-message))
-         (max-width (shaoline-available-center-width)) ;; автоширина!
-         ;; Show the message only if it's not the last shaoline string
-         (show (unless (or (null msg)
-                           (string-equal msg shaoline--last-str))
-                 msg))
+  "Show the most recent user `message' for a fixed duration.
+
+The last non-empty message is retained for
+`shaoline-message-timeout' seconds, independent of Shaoline’s own
+update rhythm."
+  (let* ((age   (time-since shaoline--last-user-message-ts))
+         (show  (and shaoline--last-user-message
+                     (< (float-time age) (max 0 shaoline-message-timeout))
+                     shaoline--last-user-message))
+         (max-width (shaoline-available-center-width))
          (shown-str (or show ""))
          (padded-str
-          ;; Растягиваем, если надо — дополнительно пробелы вправо!
           (if (>= (string-width shown-str) max-width)
               (truncate-string-to-width shown-str max-width 0 ?\s)
-            (concat shown-str (make-string (- max-width (string-width shown-str)) ?\s)))))
+            (concat shown-str
+                    (make-string (- max-width (string-width shown-str)) ?\s)))))
     (propertize padded-str 'face 'shaoline-echo-face)))
 
 ;; Battery segment (if `battery` is available)
@@ -651,34 +639,37 @@ Requires `all-the-icons` and a working `battery-status-function`."
                             (cdr (assoc "state" data))))
                 (icon (cond
                        ((not (featurep 'all-the-icons)) "")
+                       ;; Сначала пытаемся выбрать иконку по проценту.
+                       ((and percent (string-match "\\([0-9]+\\)" percent))
+                        (let* ((n (string-to-number (match-string 1 percent))))
+                          (cond ((>= n 90) (all-the-icons-faicon "battery-full"
+                                                                 :face 'shaoline-battery-face :height 1.0 :v-adjust 0))
+                                ((>= n 70) (all-the-icons-faicon "battery-three-quarters"
+                                                                 :face 'shaoline-battery-face :height 1.0 :v-adjust 0))
+                                ((>= n 40) (all-the-icons-faicon "battery-half"
+                                                                 :face 'shaoline-battery-face :height 1.0 :v-adjust 0))
+                                ((>= n 10) (all-the-icons-faicon "battery-quarter"
+                                                                 :face 'shaoline-battery-face :height 1.0 :v-adjust 0))
+                                (t (all-the-icons-faicon "battery-empty"
+                                                         :face 'shaoline-battery-face :height 1.0 :v-adjust 0)))))
+                       ;; Если процент недоступен, отображаем статус-иконки.
                        ((and status
                              (let ((case-fold-search t))
-                               (string-match-p "ac" status)))
+                               (string-match-p "full" status)))
+                        (all-the-icons-faicon "battery-full" :face 'shaoline-battery-face :height 1.0 :v-adjust 0))
+                       ((and status
+                             (let ((case-fold-search t))
+                               (string-match-p "\\<ac\\>" status)))
                         (all-the-icons-octicon "plug" :face 'shaoline-battery-face :height 1.0 :v-adjust 0))
                        ((and status
                              (let ((case-fold-search t))
                                (string-match-p "charging" status)))
                         (all-the-icons-faicon "bolt" :face 'shaoline-battery-face :height 1.0 :v-adjust 0))
+                       ;; Можно добавить отдельную иконку для разрядки, но сейчас ― пусто.
                        ((and status
                              (let ((case-fold-search t))
                                (string-match-p "discharging" status)))
-                        "")  ;; Could use a separate icon for discharging if desired
-                       ((and status
-                             (let ((case-fold-search t))
-                               (string-match-p "full" status)))
-                        (all-the-icons-faicon "battery-full" :face 'shaoline-battery-face :height 1.0 :v-adjust 0))
-                       ((and percent (string-match "\\([0-9]+\\)" percent))
-                        (let* ((n (string-to-number (match-string 1 percent))))
-                          (cond ((>= n 90) (all-the-icons-faicon "battery-full"
-                                                                  :face 'shaoline-battery-face :height 1.0 :v-adjust 0))
-                                ((>= n 70) (all-the-icons-faicon "battery-three-quarters"
-                                                                :face 'shaoline-battery-face :height 1.0 :v-adjust 0))
-                                ((>= n 40) (all-the-icons-faicon "battery-half"
-                                                                :face 'shaoline-battery-face :height 1.0 :v-adjust 0))
-                                ((>= n 10) (all-the-icons-faicon "battery-quarter"
-                                                                :face 'shaoline-battery-face :height 1.0 :v-adjust 0))
-                                (t (all-the-icons-faicon "battery-empty"
-                                                         :face 'shaoline-battery-face :height 1.0 :v-adjust 0)))))
+                        "")
                        (t ""))))
            (if percent
                (concat
@@ -724,6 +715,22 @@ Requires `all-the-icons` and a working `battery-status-function`."
 ;; Time + Moon Phase segment
 ;; We need calendar for `calendar-phase-of-moon` and `calendar-current-date`.
 
+;; Helper: compute moon phase index 0..7 for a given date.
+;; 0 = new moon, 4 = full moon, etc.
+(defun calendar-phase-of-moon (&optional date)
+  "Return moon phase index 0..7 for DATE (Gregorian list). Defaults to today.
+0 = new moon, 4 = full moon."
+  (let* ((d        (or date (calendar-current-date)))
+         (abs-day  (float (calendar-absolute-from-gregorian d)))
+         (synodic  29.530588853)  ; length of synodic month
+         ;; age in days since last new moon:
+         (age      (- abs-day
+                       (* (floor (/ abs-day synodic)) synodic)))
+         ;; scale age to 0..8, then floor to 0..7
+         (idx      (mod (floor (* age (/ 8.0 synodic))) 8)))
+    idx))
+
+
 (shaoline-define-simple-segment shaoline-segment-time
   "Current time with moon phase."
   (let* ((time (propertize (format-time-string "%H:%M")
@@ -734,9 +741,10 @@ Requires `all-the-icons` and a working `battery-status-function`."
          (phases ["🌑" "🌒" "🌓" "🌔" "🌕" "🌖" "🌗" "🌘"])
          (moon (propertize (aref phases phase-number)
                            'face 'shaoline-time-face)))
-    (concat time " " moon)))
+    (concat time " " moon "  ")))  ;; Два пробела справа в запас
 
 ;; ---------------------------------------------------------------------------
+
 
 (provide 'shaoline)
 ;;; shaoline.el ends here
