@@ -175,11 +175,8 @@ Tweak segments as calmly as rearranging stones: simply, purposefully."
 (defvar shaoline--last-str ""
   "Last rendered string, used to avoid unnecessary redisplay. Repetition is not enlightenment.")
 
-(defvar shaoline--last-user-message nil
-  "Last *user* message captured by Shaoline (string or nil).")
-
-(defvar shaoline--last-user-message-ts 0
-  "Timestamp (as returned by `float-time') when the last user message was stored.")
+;; Message state now handled by shaoline-msg-engine.el
+(require 'shaoline-msg-engine)
 
 (defvar shaoline--default-mode-line-format-backup nil
   "Backup of `default-mode-line-format' when the modeline is hidden (restored when Shaoline is disabled).")
@@ -277,14 +274,19 @@ True elegance: nothing more than necessary."
 
 (defun shaoline--apply-segment (fn buffer)
   "Call segment FN with BUFFER (or with no args if not needed) and return its string.
-Errors are returned as a diagnostic string, not signalled."
+Errors are returned as a diagnostic string, not signalled; stacktrace is logged if `shaoline-debug`."
   (condition-case err
       (let* ((arity (help-function-arglist fn t))
              (res (if (and (consp arity) (not (null arity)))
                       (funcall fn buffer)
                     (funcall fn))))
         (if (stringp res) res (or (and res (format "%s" res)) "")))
-    (error (propertize (format "[SEGMENT ERROR: %s]" err) 'face 'error))))
+    (error
+     (let ((msg (format "[SEGMENT ERROR: %s in %s]" err fn)))
+       (when shaoline-debug
+         (shaoline--log "%s" msg)
+         (shaoline--log "Traceback: %s" (with-output-to-string (backtrace))))
+       (propertize msg 'face 'error)))))
 
 (defun shaoline--collect-segments (side buffer)
   "Render all segments for SIDE (:left, :center, :right) within BUFFER.
@@ -330,16 +332,20 @@ Calculates based on the length of left and right segments, including any necessa
               shaoline-right-padding))))
 
 ;; ----------------------------------------------------------------------------
-;; Core: compose the modeline (pure version)
+;; Core: compose the modeline (pure version, NO side effects)
+;;-----------------------------------------------------------------------------
+;; This function is pure: it only computes a string with properties, no UI,
+;; no global state. It is safe for use in tests and non-UI code.
 
 (defun shaoline-compose-modeline (&optional buffer window _width)
   "Return the Shaoline string for the echo area.
 
+Pure function: collects, arranges, and truncates segments for rendering 
+in the echo area. This function is entirely side-effect free.
 The right segment is *pinned* to the right edge by means of the
 `space :align-to' display property, while the central segment is
 truncated when necessary so that the whole string never exceeds
-the window width.  This guarantees, for example, что иконка фазы
-луны остаётся видимой даже при длинных названиях проектов."
+the window width."
   (let* ((buffer  (or buffer (current-buffer)))
          (window  (or window  (selected-window)))
          (left    (mapconcat #'identity
@@ -357,7 +363,7 @@ the window width.  This guarantees, for example, что иконка фазы
                           (string-width gap-left)
                           (string-width right)
                           shaoline-right-padding
-                          (string-width gap-mid))))   ; align-to space учтён Emacs'ом
+                          (string-width gap-mid))))
          (center (if (> (string-width center0) avail)
                      (truncate-string-to-width center0 avail 0 ?\s)
                    center0)))
@@ -370,7 +376,7 @@ the window width.  This guarantees, for example, что иконка фазы
       " "
       'display `(space :align-to (- right ,(+ (string-width right)
                                               shaoline-right-padding
-                                              1)))) ; ← +1 даёт смещение влево
+                                              1))))
      right
      (make-string shaoline-right-padding ?\s))))
 
@@ -447,35 +453,24 @@ refresh when `shaoline-message-timeout` seconds have elapsed.")
   nil)
 
 (defun shaoline--message-filter-return (result &rest _args)
-  "Let Shaoline play nicely with regular `message' output.
+  "Intercept `message' for Shaoline: stores last user message & time, manages timer.
 
-When `shaoline-mode' is active, retain the user's message in the echo area
-for at least `shaoline-message-timeout` seconds. A non-empty RESULT (from `message`)
-restarts the timer; empty results neither erase text nor force a redraw.
-A pending timer will eventually bring back Shaoline's modeline."
-  ;; Ignore Shaoline’s *own* output – it carries the text-property
-  ;; 'shaoline t that we added in `shaoline--display'.
-  ;; Обходим ошибку «args-out-of-range» ─ вызываем get-text-property
-  ;; только если RESULT ‑ строка.  Для всех остальных типов (nil,
-  ;; числа и пр.) считаем, что это не Shaoline-сообщение.
+Only reacts if message from user (not Shaoline's own)."
   (when (and shaoline-mode
              (not (and (stringp result)
                        (get-text-property 0 'shaoline result))))
     (cond
-     ;; New, non-empty message: remember it and show through Shaoline.
+     ;; New, non-empty message
      ((and (stringp result) (not (string-empty-p result)))
-      (setq shaoline--last-user-message result
-            shaoline--last-user-message-ts (float-time))
-      ;; Запускаем обновление *после* возврата из оригинального
-      ;; `message', чтобы не войти повторно в `toggle-input-method'
-      ;; (и прочие функции, которые сами используют `message').
-      (run-at-time 0 nil #'shaoline--update)) ; отложенное обновление
+      (shaoline-msg-save result)
+      (run-at-time 0 nil #'shaoline--update)
+      (shaoline--maybe-start-timer)) ; нужен таймер
 
-     ;; Пустое сообщение – очищаем сохранённый текст немедленно.
+     ;; Пустое сообщение — сброс
      ((or (null result) (string-empty-p result))
-      (setq shaoline--last-user-message nil
-            shaoline--last-user-message-ts 0)
-      (run-at-time 0 nil #'shaoline--update))))
+      (shaoline-msg-clear)
+      (run-at-time 0 nil #'shaoline--update)
+      (shaoline--maybe-cancel-timer))))
   result)
 
 
@@ -483,7 +478,35 @@ A pending timer will eventually bring back Shaoline's modeline."
 (add-hook 'shaoline-mode-hook #'shaoline--cancel-redisplay-timer)
 
 (defvar shaoline--timer nil
-  "Internal timer used by `shaoline-mode' for periodic updates.")
+  "Internal timer used by `shaoline-mode' for periodic updates (only when needed).")
+
+(defun shaoline--maybe-start-timer ()
+  "Запускать ленивый таймер только если требуется обновлять динамические сегменты (например, время, батарея)."
+  (when (and (null shaoline--timer) shaoline-mode)
+    (setq shaoline--timer
+          (run-with-timer shaoline-timer-interval
+                          shaoline-timer-interval
+                          #'shaoline--lazy-update))))
+
+(defun shaoline--maybe-cancel-timer ()
+  "Убить таймер, если он не нужен."
+  (when (timerp shaoline--timer)
+    (cancel-timer shaoline--timer)
+    (setq shaoline--timer nil)))
+
+(defun shaoline--lazy-update ()
+  "Ленивая обновляющая функция: если нет показа echo-message и нет динамического сегмента — убираем себя."
+  (shaoline--log "shaoline--lazy-update")
+  (let ((should-keep
+         (or
+          ;; Центр может включать временной сегмент; присутствует ли он?
+          (cl-member 'shaoline-segment-time (cdr (assq :right shaoline-segments)))
+          (cl-member 'shaoline-segment-time (cdr (assq :center shaoline-segments)))
+          ;; Пользовательское сообщение ещё "живое"
+          (shaoline-msg-active-p shaoline-message-timeout))))
+    (shaoline--update)
+    (unless should-keep
+      (shaoline--maybe-cancel-timer))))
 
 ;;;###autoload
 (define-minor-mode shaoline-mode
@@ -506,10 +529,8 @@ A pending timer will eventually bring back Shaoline's modeline."
         (add-hook 'isearch-mode-hook        #'shaoline--clear-display)
         (add-hook 'isearch-mode-end-hook    #'shaoline--update)
         (shaoline--update)
-        (setq shaoline--timer
-              (run-with-timer shaoline-timer-interval
-                              shaoline-timer-interval
-                              #'shaoline--update)))
+        (setq shaoline--timer nil) ;; Таймер больше не запускаем автоматически, только лениво.
+        )
     ;; turn off
     (dolist (hook shaoline-update-hooks)
       (remove-hook hook #'shaoline--update))
@@ -532,218 +553,19 @@ A pending timer will eventually bring back Shaoline's modeline."
       (setq shaoline--resize-mini-windows-backup nil))))
 
 ;; ----------------------------------------------------------------------------
-;; Segments
-;; ---------------------------------------------------------------------------
+;; Segments are now located in a separate file.
+(require 'shaoline-segments)
 
-(defun shaoline--get-buffer-icon (buffer)
-  "Return a buffer icon, possibly using `all-the-icons'.
-Chooses color/iconation similar to tabs: prefers icon-for-mode (colored), else
-icon-for-file, else default faicon."
-  (when (require 'all-the-icons nil t)
-    (let* ((mode (buffer-local-value 'major-mode buffer))
-           (raw-icon (all-the-icons-icon-for-mode mode :height 0.9))
-           (icon
-            (cond
-             ((stringp raw-icon) raw-icon)
-             ((buffer-file-name buffer)
-              (all-the-icons-icon-for-file
-               (buffer-file-name buffer) :height 0.9))
-             (t
-              (all-the-icons-faicon "file-o" :height 0.9)))))
-      icon)))
-
-(defconst shaoline--icon-width 3
-  "Fixed icon width (in display columns) for shaoline buffer icons.
-You may need to adapt this for your font & setup.")
-
-(shaoline-define-segment shaoline-segment-icon-and-buffer (buffer)
-  "Цветная иконка буфера (по режиму, как во вкладках) + имя буфера.
-➤ Например:  README.org — иконка будет цветной и соответствовать файлу/режиму."
-  (let* ((icon (shaoline--get-buffer-icon buffer)) ;; Теперь — цветная иконка, та же логика.
-         (name (buffer-name buffer))
-         (text (if icon (concat icon " " name) name)))
-    ;; Face только к имени (иконка останется цветной/оформленной, не затрагивается face).
-    (add-face-text-property
-     (if icon (length icon) 0) (length text)
-     'shaoline-buffer-face 'append
-     text)
-    text))
-
-;; Project name (for example, Projectile)
-(shaoline-define-simple-segment shaoline-segment-project-name
-  "Project name, if available."
-  (let* ((project
-          (cond
-           ((and (featurep 'projectile) (projectile-project-name))
-            (projectile-project-name))
-           ((fboundp 'project-current)
-            (when-let ((pr (project-current)))
-              (file-name-nondirectory (directory-file-name (car (project-roots pr))))))
-           (t nil))))
-    (when (and project (not (string= "-" project)))
-      (propertize project 'face 'shaoline-project-face))))
-
-;; Git branch (projectile / vc-git)
-(shaoline-define-simple-segment shaoline-segment-git-branch
-  "Current Git branch."
-  (when (and (featurep 'vc-git) (buffer-file-name))
-    (let ((branch (vc-git--symbolic-ref (buffer-file-name))))
-      (when branch
-        (concat
-         (all-the-icons-octicon "git-branch" :v-adjust 0 :height 1.0 :face 'shaoline-git-face)
-         " "
-         (propertize branch 'face 'shaoline-git-face))))))
-
-
-
-;; Echo-area message segment (for demonstration – shows `current-message`)
-(shaoline-define-simple-segment shaoline-segment-echo-message
-  "Show the most recent user `message' for a fixed duration.
-
-The last non-empty message is retained for
-`shaoline-message-timeout' seconds, independent of Shaoline’s own
-update rhythm."
-  (let* ((age   (time-since shaoline--last-user-message-ts))
-         (show  (and shaoline--last-user-message
-                     (< (float-time age) (max 0 shaoline-message-timeout))
-                     shaoline--last-user-message))
-         (max-width (shaoline-available-center-width))
-         (shown-str (or show ""))
-         (padded-str
-          (if (>= (string-width shown-str) max-width)
-              (truncate-string-to-width shown-str max-width 0 ?\s)
-            (concat shown-str
-                    (make-string (- max-width (string-width shown-str)) ?\s)))))
-    (propertize padded-str 'face 'shaoline-echo-face)))
-
-;; Battery segment (if `battery` is available)
-(shaoline-define-simple-segment
- shaoline-segment-battery
- "Show battery percentage and charging status (icon, optional).
-Requires `all-the-icons` and a working `battery-status-function`."
- (if (and (fboundp 'battery)
-          battery-status-function)
-     (let* ((data (and battery-status-function (funcall battery-status-function))))
-       (cond
-        ;; (A) If data is an alist (list of cons cells), use the old logic 
-        ((and (listp data)
-              (not (null data))
-              (cl-every #'consp data))
-         (let* ((percent (or (cdr (assoc 112 data))           ; char code ?p
-                             (cdr (assoc "percentage" data))  ; string key
-                             (cdr (assoc "perc" data))        ; alt string key
-                             (cdr (assoc "capacity" data))))  ; another possible key
-                (status (or (cdr (assoc 66 data))             ; char code ?B
-                            (cdr (assoc "status" data))
-                            (cdr (assoc "charging" data))
-                            (cdr (assoc "state" data))))
-                (icon (cond
-                       ((not (featurep 'all-the-icons)) "")
-                       ;; Сначала пытаемся выбрать иконку по проценту.
-                       ((and percent (string-match "\\([0-9]+\\)" percent))
-                        (let* ((n (string-to-number (match-string 1 percent))))
-                          (cond ((>= n 90) (all-the-icons-faicon "battery-full"
-                                                                 :face 'shaoline-battery-face :height 1.0 :v-adjust 0))
-                                ((>= n 70) (all-the-icons-faicon "battery-three-quarters"
-                                                                 :face 'shaoline-battery-face :height 1.0 :v-adjust 0))
-                                ((>= n 40) (all-the-icons-faicon "battery-half"
-                                                                 :face 'shaoline-battery-face :height 1.0 :v-adjust 0))
-                                ((>= n 10) (all-the-icons-faicon "battery-quarter"
-                                                                 :face 'shaoline-battery-face :height 1.0 :v-adjust 0))
-                                (t (all-the-icons-faicon "battery-empty"
-                                                         :face 'shaoline-battery-face :height 1.0 :v-adjust 0)))))
-                       ;; Если процент недоступен, отображаем статус-иконки.
-                       ((and status
-                             (let ((case-fold-search t))
-                               (string-match-p "full" status)))
-                        (all-the-icons-faicon "battery-full" :face 'shaoline-battery-face :height 1.0 :v-adjust 0))
-                       ((and status
-                             (let ((case-fold-search t))
-                               (string-match-p "\\<ac\\>" status)))
-                        (all-the-icons-octicon "plug" :face 'shaoline-battery-face :height 1.0 :v-adjust 0))
-                       ((and status
-                             (let ((case-fold-search t))
-                               (string-match-p "charging" status)))
-                        (all-the-icons-faicon "bolt" :face 'shaoline-battery-face :height 1.0 :v-adjust 0))
-                       ;; Можно добавить отдельную иконку для разрядки, но сейчас ― пусто.
-                       ((and status
-                             (let ((case-fold-search t))
-                               (string-match-p "discharging" status)))
-                        "")
-                       (t ""))))
-           (if percent
-               (concat
-                (if (and (stringp icon) (not (string-empty-p icon)))
-                    (concat icon " "))
-                (propertize (concat (replace-regexp-in-string "%" "" percent) "%")
-                            'face 'shaoline-battery-face))
-             ;; If no percent, show a fallback "no battery" string with an icon if possible.
-             (propertize
-              (if (featurep 'all-the-icons)
-                  (concat
-                   (all-the-icons-faicon "battery-empty" :height 1.0 :v-adjust 0 :face 'shaoline-battery-face)
-                   " No battery")
-                "No battery")
-              'face '(:inherit shaoline-battery-face :slant italic)))))
-        ;; (B) If data is a string (your case), just display it
-        ((and (stringp data)
-              (not (string-empty-p data)))
-         (propertize data 'face 'shaoline-battery-face))
-        ;; (C) Fallback ("No battery" symbol)
-        (t
-         (propertize
-          (if (featurep 'all-the-icons)
-              (all-the-icons-faicon "battery-empty" :height 1.0 :v-adjust 0 :face 'shaoline-battery-face)
-            "N/A")
-          'face '(:inherit shaoline-battery-face :slant italic)))))
-   ;; battery functionality not available
-   ""))
-
-;; Major-mode
-(shaoline-define-simple-segment shaoline-segment-major-mode
-  "Major mode segment with icon."
-  (let ((icon (when (and (featurep 'all-the-icons) major-mode)
-                (all-the-icons-icon-for-mode major-mode :height 0.9 :v-adjust 0))))
-    (concat
-     ;; if `icon` is a string (not a symbol placeholder), show it
-     (when (and icon (stringp icon))
-       (concat icon " "))
-     (propertize
-      (format-mode-line mode-name)
-      'face 'shaoline-mode-face))))
-
-;; Time + Moon Phase segment
-;; We need calendar for `calendar-phase-of-moon` and `calendar-current-date`.
-
-;; Helper: compute moon phase index 0..7 for a given date.
-;; 0 = new moon, 4 = full moon, etc.
-(defun calendar-phase-of-moon (&optional date)
-  "Return moon phase index 0..7 for DATE (Gregorian list). Defaults to today.
-0 = new moon, 4 = full moon."
-  (let* ((d        (or date (calendar-current-date)))
-         (abs-day  (float (calendar-absolute-from-gregorian d)))
-         (synodic  29.530588853)  ; length of synodic month
-         ;; age in days since last new moon:
-         (age      (- abs-day
-                       (* (floor (/ abs-day synodic)) synodic)))
-         ;; scale age to 0..8, then floor to 0..7
-         (idx      (mod (floor (* age (/ 8.0 synodic))) 8)))
-    idx))
-
-
-(shaoline-define-simple-segment shaoline-segment-time
-  "Current time with moon phase."
-  (let* ((time (propertize (format-time-string "%H:%M")
-                           'face 'shaoline-time-face))
-         ;; 0 = new, 4 = full, etc. 0–7 index into our icons.
-         (phase-number (calendar-phase-of-moon
-                        (calendar-current-date)))
-         (phases ["🌑" "🌒" "🌓" "🌔" "🌕" "🌖" "🌗" "🌘"])
-         (moon (propertize (aref phases phase-number)
-                           'face 'shaoline-time-face)))
-    (concat time " " moon "  ")))  ;; Два пробела справа в запас
-
-;; ---------------------------------------------------------------------------
+;; --- Auto-load user-defined segments if available ---
+(let ((user-file
+       (or
+        (expand-file-name "shaoline-user-segments.el" user-emacs-directory)
+        (and load-file-name
+             (expand-file-name "shaoline-user-segments.el" (file-name-directory load-file-name))))))
+  (when (and user-file (file-exists-p user-file))
+    (condition-case err
+        (load user-file nil t)
+      (error (shaoline--log "Could not load user segments: %s" err)))))
 
 
 (provide 'shaoline)
