@@ -59,14 +59,37 @@ Arrange them as stones in a garden: remove, replace, or add—freely, and withou
 | Variable                    | Description                                      |
 |-----------------------------+--------------------------------------------------|
 | shaoline-segments           | Controls the display order of line segments      |
-| shaoline-autohide-modeline  | Hides the default mode-line if t                 |
-| shaoline-timer-interval     | How often Shaoline updates timed segments        |
-| shaoline-message-timeout    | How long before Shaoline resumes after a message |
-| shaoline-update-hooks       | What events trigger Shaoline updates             |
+| shaoline-autohide-modeline  | If t, hides the default mode-line                |
+| shaoline-timer-interval     | How often Shaoline updates timed/dynamic segments|
+| shaoline-message-timeout    | Seconds before Shaoline resumes after a message  |
+| shaoline-update-hooks       | Events that trigger Shaoline updates             |
+|-----------------------------+--------------------------------------------------|
+| shaoline-icon-width         | Width (in chars) for all-the-icons; pad/truncate |
+| shaoline-right-padding      | Spaces appended to the right edge                |
+| shaoline-debug              | When t, logs activity into *shaoline-logs*       |
 
 * Configuration Examples
 
 To see and change all customization options in an interactive interface:
+
+** Usage Examples for New Options
+
+- Tweak icon width for all-the-icons if your font's icons are too wide or too narrow:
+  #+BEGIN_SRC emacs-lisp
+  (setq shaoline-icon-width 3)
+  #+END_SRC
+
+- Add extra spaces to the right for alignment or aesthetics:
+  #+BEGIN_SRC emacs-lisp
+  (setq shaoline-right-padding 4)
+  #+END_SRC
+
+- Enable verbose debugging to record everything Shaoline does:
+  #+BEGIN_SRC emacs-lisp
+  (setq shaoline-debug t)
+  #+END_SRC
+  Then check everything in the buffer named *shaoline-logs*.
+
 
 #+BEGIN_SRC emacs-lisp
 M-x customize-group RET shaoline RET
