@@ -136,7 +136,7 @@ Tweak segments as calmly as rearranging stones: simply, purposefully."
   :type 'boolean
   :group 'shaoline)
 
-(defcustom shaoline-right-padding 16
+(defcustom shaoline-right-padding 0
   "Extra spaces appended to the right edge of the shaoline. Sometimes, a little emptiness is all you need."
   :type 'integer
   :group 'shaoline)
@@ -355,48 +355,47 @@ Calculates based on the length of left and right segments, including any necessa
 ;; ----------------------------------------------------------------------------
 ;; Core: compose the modeline (pure version)
 
-(defun shaoline-compose-modeline (&optional buffer window width)
-  "Compose a Shaoline string that fits within WIDTH.
-This function is pure and returns a string with no side effects.
-What appears is simply what fits."
-  (let* ((window (or (and (windowp window) window)
-                     (selected-window)))
-         (buffer (or buffer (window-buffer window)))
-         (width  (or width
-                     (let* ((mini (minibuffer-window))
-                            (mini-width (and (window-live-p mini)
-                                             (window-width mini))))
-                       (or mini-width (frame-width)))))
-         (left   (mapconcat #'identity (shaoline--collect-segments :left buffer) " "))
-         (right  (mapconcat #'identity (shaoline--collect-segments :right buffer) " "))
-         (center (mapconcat #'identity (shaoline--collect-segments :center buffer) " "))
-         (left-w (string-width left))
-         (right-w (string-width right))
-         ;; Always insert a space before the center (echo) segment
-         (space-left " ")
-         (space-right (if (not (string-empty-p right)) " " ""))
-         ;; Calculate maximum available space for the center
-         (available
-          (max 0 (- width
-                    left-w
-                    right-w
-                    (string-width space-left)
-                    (string-width space-right)
-                    shaoline-right-padding)))
-         ;; Pad or truncate the center string as needed
-         (center-str
-          (if (> (string-width center) available)
-              (truncate-string-to-width center available 0 ?\s)
-            (concat center (make-string (- available (string-width center)) ?\s)))))
-    (let ((final (concat
-                  left
-                  space-left
-                  center-str
-                  space-right
-                  right
-                  (make-string shaoline-right-padding ?\s))))
-      ;; Ensure we never exceed the echo area width
-      (truncate-string-to-width final width 0 ?\s))))
+(defun shaoline-compose-modeline (&optional buffer window _width)
+  "Return the Shaoline string for the echo area.
+
+The right segment is *pinned* to the right edge by means of the
+`space :align-to' display property, while the central segment is
+truncated when necessary so that the whole string never exceeds
+the window width.  This guarantees, for example, что иконка фазы
+луны остаётся видимой даже при длинных названиях проектов."
+  (let* ((buffer  (or buffer (current-buffer)))
+         (window  (or window  (selected-window)))
+         (left    (mapconcat #'identity
+                             (shaoline--collect-segments :left buffer) " "))
+         (center0 (mapconcat #'identity
+                             (shaoline--collect-segments :center buffer) " "))
+         (right   (mapconcat #'identity
+                             (shaoline--collect-segments :right buffer) " "))
+         (gap-left (if (string-empty-p left) "" " "))
+         (gap-mid  (if (and (not (string-empty-p center0))
+                            (not (string-empty-p right)))
+                       " " ""))
+         (avail (max 0 (- (window-width window)
+                          (string-width left)
+                          (string-width gap-left)
+                          (string-width right)
+                          shaoline-right-padding
+                          (string-width gap-mid))))   ; align-to space учтён Emacs'ом
+         (center (if (> (string-width center0) avail)
+                     (truncate-string-to-width center0 avail 0 ?\s)
+                   center0)))
+    (concat
+     left
+     gap-left
+     center
+     gap-mid
+     (propertize
+      " "
+      'display `(space :align-to (- right ,(+ (string-width right)
+                                              shaoline-right-padding
+                                              1)))) ; ← +1 даёт смещение влево
+     right
+     (make-string shaoline-right-padding ?\s))))
 
 ;; ----------------------------------------------------------------------------
 ;; Display/update
